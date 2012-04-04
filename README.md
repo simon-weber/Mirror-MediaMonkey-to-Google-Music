@@ -1,4 +1,4 @@
-#mm2gm: sync MediaMonkey to Google Music
+#sync2gm and mm2gm: sync MediaMonkey to Google Music
 
 Built on [gmusicapi](https://github.com/simon-weber/Unofficial-Google-Music-API), this project aims to sync a MediaMonkey library to Google Music.
 
