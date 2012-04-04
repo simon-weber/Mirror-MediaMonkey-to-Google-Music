@@ -6,9 +6,9 @@ The implementation will be a local service that, given a database with a specifi
 
 The project is not supported nor endorsed by Google.
 
-##design
+##Design
 
-###attaching to the local database
+###Attaching to the local database
 
 "Attaching" sets up our own state on the local database:
 
@@ -31,7 +31,7 @@ For each song update, this table holds the updated song metadata. There doesn't 
 For each playlist update, this table holds all of the songs in the playlist. I'm not sure how to deal with autoplaylists that just store their query information - it's probably best done by comparing the result queries every so often and uploading when they change. Perhaps the user could force an update as well.
 
 * pChangeId (primary, auto)
-* auditId (foreign)
+* changeId (foreign)
 * gmSongId - (unique) Google Music id of a song in the updated playlist
 
 **sets up relevant triggers**:
@@ -49,13 +49,13 @@ Like the Songids table, but for playlists.
 * localId (foreign, primary)
 * gmId (unique)
 
-###initial sync
+###Initial sync
 Before the service can begin to sync changes, the Google Music library must be empty, and the Changes table must be manually populated with creations of all the current local songs. This implies uploading all of the music - which is necessary so the local service can map local ids to Google Music ids.
 
-###continuous sync
+###Continuous sync
 Now, the local service can take over. To make this cross-platform, I'm thinking of implementing the service as an RPC server running in Python. The server, once running, would accept commands to start syncing and stop syncing. While syncing, it polls the Changes table, then pushes out changes to Google Music. After a change is verified as successful, that row in the Changes table is deleted.
 
-###detaching from the local database
+###Detaching from the local database
 This would just remove the tables created in the attachment step. Resyncing after this point would require going through the entire process again (including re-uploading all the songs).
 
 - - -
