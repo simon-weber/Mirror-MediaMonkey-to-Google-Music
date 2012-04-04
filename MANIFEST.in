@@ -1,0 +1,2 @@
+include COPYING mm2gm.py README.md
+recursive-include sync2gm *.py
