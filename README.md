@@ -22,6 +22,7 @@ This is a queue of changes to the local database that will be synced to Google M
 * playlistName - for playlist create/update, the name of the playlist. null otherwise.
 * a column for each piece of local song metadata. null except for uSong.
 
+schema:
 
     CREATE TABLE sync2gm_Changes(
 	   changeId INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
@@ -47,6 +48,8 @@ For each playlist update, this table holds all of the songs in the playlist. I'm
 
 * changeId (foreign)
 * gmSongId - (unique) Google Music id of a song in the updated playlist
+
+schema:
 
     CREATE TABLE sync2gm_PlaylistChanges(
     	   changeId INTEGER REFERENCES sync2gm_Changes,
@@ -86,6 +89,7 @@ This table relates local song ids to Google Music song ids, and is updated by th
 * localId (foreign, primary)
 * gmId (unique)
 
+schema:
 
     CREATE TABLE sync2gm_GMSongIds(
     	   localId INTEGER PRIMARY KEY REFERENCES Songs(ID),
@@ -98,6 +102,7 @@ Like the Songids table, but for playlists.
 * localId (foreign, primary)
 * gmId (unique)
 
+schema:
 
     CREATE TABLE sync2gm_GMPlaylistIds(
     	   localId INTEGER PRIMARY KEY REFERENCES Playlists(IDPlaylist),
