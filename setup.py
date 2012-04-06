@@ -40,7 +40,9 @@ setup(
 """,
     install_requires=[
         "gmusicapi >= 2012.04.03",
-        "sqlite3"
+        "sqlite3",
+        "appdirs",
+        "Twisted"
     ],
     classifiers = [
         "Programming Language :: Python",
