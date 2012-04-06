@@ -2,7 +2,7 @@
 
 Built on [gmusicapi](https://github.com/simon-weber/Unofficial-Google-Music-API), this project aims to sync a MediaMonkey library to Google Music.
 
-The MediaMonkey implementation will be separate from the underlying Google Music syncing service, which will be platform and mediaplayer agnostic. This should allow easy adaptation other mediaplayers with an sqlite3 database (Banshee, Songbird, Clemtine, etc).
+The MediaMonkey implementation will be separate from the underlying Google Music syncing service, which will be platform and mediaplayer agnostic. This should allow easy adaptation to other mediaplayers with an sqlite3 database (Banshee, Songbird, Clemtine, etc).
 
 The project is not supported nor endorsed by Google.
 
@@ -10,7 +10,7 @@ The project is not supported nor endorsed by Google.
 
 The project does not yet have an implementation. The current prospective design is outlined below.
 
-There are two pieces to an implementation: the service (sync2gm) and the client (mm2gm). The service actually pushes out changes, while the client is responsible for setting it up and running it.
+There are two pieces to an implementation: the service (sync2gm) and the client (mm2gm). The service actually pushes out changes, while the client is responsible for setting it up and running the service.
 
 The service is simple: a thread that polls for updates in a work queue, wrapped with some Twisted networking logic for cross-platform communication with the client. It persists configuration on disk.
 
