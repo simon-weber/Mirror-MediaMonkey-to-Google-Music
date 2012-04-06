@@ -25,16 +25,9 @@ from twisted.protocols.basic import LineReceiver
 # args_query is an optional list of sql SELECT queries to run, each of which is given as a positional param to push_change, when called.
 #  the queries are given a named parameter :localId.
 DBChangeHandler = collections.namedtuple('DBChangeHandler', ['push_change', 'args_query'])
-TriggerDef = collections.namedtupled('TriggerDef', ['name', 'table', 'stmt'])
-#eg:
-    # CREATE TRIGGER sync2gm_cSong AFTER INSERT ON Songs
-    # BEGIN
-    #     INSERT INTO sync2gm_Changes (changeType, localId) VALUES (0, new.ID);
-    # END
-#would be:
-# .name = 'sync2gm_cSong'
-# .table = 'Songs'
-# .stmt = entire above text, with {name} and {table} used as placeholders
+TriggerDef = collections.namedtupled('TriggerDef', ['name', 'table', 'when', 'idValText'])
+#when surrounded by eg
+# CREATE TRIGGER {name} when ON {table}
 
 class GMSyncError(Exception):
     pass

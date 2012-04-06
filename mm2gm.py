@@ -1,19 +1,60 @@
 #!/usr/bin/env python
 
-import sqlite3
 
-import sync2gm
+"""Allows syncing of a MediaMonkey database to Google Music."""
 
-#enum of change types, {c,u,d}x{Song, Playlist}
-# eg CTypes.cSong
-from sync2gm import CTypes 
-
+from sync2gm import DBChangeHandler, TriggerDef
 
 ## config start ##
+triggers = [
+#Song triggers:
+TriggerDef(name='sync2gm_cSong',
+           table='Songs',
+           when="AFTER INSERT",
+           idValText='new.ID'),
 
-#The names of the tables in the MM db.
-songs_table = "Songs"
-plists_table = "Playlists"
+TriggerDef(name='sync2gm_uSong',
+           table='Songs',
+           when="AFTER UPDATE OF (Artist, Album, AlbumArtist, Comment, Genre, Rating, Year, DiscNumber, TrackNumber, BPM, SongTitle)",
+           idValText='new.ID'),
+
+TriggerDef(name='sync2gm_dSong',
+           table='Songs',
+           when="AFTER DELETE",
+           idValText='old.ID')
+
+#Playlist triggers:
+TriggerDef(name='sync2gm_cPlaylist',
+           table='Playlists',
+           when="AFTER INSERT",
+           idValText='new.IDPlaylist'),
+
+TriggerDef(name='sync2gm_uPlaylistName',
+           table='Playlists',
+           when="AFTER UPDATE OF (PlaylistName)",
+           idValText='new.IDPlaylist'),
+
+TriggerDef(name='sync2gm_addPlaylistSong',
+           table='PlaylistSongs',
+           when="AFTER INSERT",
+           idValText='new.IDPlaylistSong'),
+
+TriggerDef(name='sync2gm_delPlaylistSong',
+           table='PlaylistSongs',
+           when="AFTER DELETE",
+           idValText='old.IDPlaylistSong'),
+
+TriggerDef(name='sync2gm_movePlaylistSong',
+           table='PlaylistSongs',
+           when="AFTER UPDATE OF (SongOrder)",
+           idValText='new.IDPlaylistSong'),
+
+#Autoplaylist-specific triggers:
+TriggerDef(name='sync2gm_uAPlaylistQuery',
+           table='Playlists',
+           when="AFTER UPDATE OF (QueryData)",
+           idValText='new.IDPlaylist')
+]
 
 #List of MM db columns that map directly to GM md keys (once in camelCase).
 # eg MM: "AlbumArtist" -> GM "albumArtist"
@@ -41,14 +82,3 @@ for mm_c in cols_same:
     mm_to_gm_cols[mm_c] = mm_c[0].lower + mm_c[1:]
 
 mm_to_gm_cols = dict(mm_to_gm_cols.items() + cols_diff.items())
-
-
-
-
-def attach(db_path):
-    """Create the audit and sync tables on the db at *db_path*."""
-    pass
-
-def detach(db_path):
-    """Remove the audit and sync tables from the db at *db_path*."""
-    pass

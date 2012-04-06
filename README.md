@@ -2,82 +2,37 @@
 
 Built on [gmusicapi](https://github.com/simon-weber/Unofficial-Google-Music-API), this project aims to sync a MediaMonkey library to Google Music.
 
-The implementation will be a local service that, given a database with a specific layout, will push changes to Google Music. This should be mediaplayer-agnostic. To support some other mediaplayer, someone would have to implement the attachment to the database, and the initial sync. From there, the service should be able to keep the local library synced.
+The MediaMonkey implementation will be separate from the underlying Google Music syncing service, which will be platform and mediaplayer agnostic. This should allow easy adaptation other mediaplayers with an sqlite3 database (Banshee, Songbird, Clemtine, etc).
 
 The project is not supported nor endorsed by Google.
 
 ##Design
 
+The project does not yet have an implementation. The current prospective design is outlined below.
+
+There are two pieces to an implementation: the service (sync2gm) and the client (mm2gm). The service actually pushes out changes, while the client is responsible for setting it up and running it.
+
+The service is simple: a thread that polls for updates in a work queue, wrapped with some Twisted networking logic for cross-platform communication with the client. It persists configuration on disk.
+
+The client's configuration tells the service which triggers should be set up, and how to handle a change logged by each trigger.
+
+Here are the steps involved in setup and teardown of the service for some media database:
+
 ###Attaching to the local database
-
-"Attaching" sets up our own state on the local database. The following schemas must be matched exactly for the service to work (out of the box, it could always be edited). The example code is for sqlite and MediaMonkey.
-
-**creates the "sync2gm_Changes" table**:
-This is a queue of changes to the local database that will be synced to Google Music. Only a change type and local id is stored. The service handles gathering the necessary data.
-
-* changeId
-* changeType - 0-n enum for the different kinds of updates that can happen; something like |{c,u,d}x{song, playlist}|
-* localId - mediaplayer id.
-
-schema:
-
-    CREATE TABLE sync2gm_Changes(
-	   changeId INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-	   changeType NOT NULL CHECK (changeType BETWEEN 0 AND <n>),
-	   localId <type of local db> NOT NULL
-    )
-
-
-**sets up relevant triggers**:
-These triggers will auto-populate the change table when things are happen locally. They differ in the changeType they provide, the table they operate on, and the local item id they select (song vs playlist).
-
-eg cSong:
-
-    CREATE TRIGGER sync2gm_cSong AFTER INSERT ON Songs
-    BEGIN
-	INSERT INTO sync2gm_Changes (changeType, localId) VALUES (0, new.ID);
-    END
-
-
-eg dPlaylist:
-
-    CREATE TRIGGER sync2gm_dPlaylist AFTER DELETE ON Playlists
-    BEGIN
-	INSERT INTO sync2gm_Changes (changeType, localId) VALUES (3, old.IDPlaylist);
-    END
-
-
-**creates the "sync2gm_GMSongIds" table**:
-This table relates local song ids to Google Music song ids, and is updated by the service when uploads and deletions are performed. This is 1-to-1, but is pulled out so we don't need to add columns to the local database. Updates to this table are performed automatically by the service when items are created/deleted.
-
-* localId (foreign, primary)
-* gmId (unique)
-
-schema:
-
-    CREATE TABLE sync2gm_GMSongIds(
-    	   localId INTEGER PRIMARY KEY REFERENCES Songs(ID),
-	   gmId TEXT UNIQUE NOT NULL
-    )
-
-**creates the "sync2gm_GMPlaylistIds" table**:
-Like the Songids table, but for playlists.
-
-schema:
-
-    CREATE TABLE sync2gm_GMPlaylistIds(
-    	   localId INTEGER PRIMARY KEY REFERENCES Playlists(IDPlaylist),
-	   gmId TEXT UNIQUE NOT NULL
-    )
+This sets up our own state on the local database. This is done once for a database by the client, before the service is run. A work queue table and triggers to populate it is created, along with tables mapping local items (song/playlists) to remote (Google Music) items.
 
 ###Initial sync
-Before the service can begin to sync changes, the Google Music library must be empty, and the Changes table must be manually populated with creations of all the current local items. This implies uploading all of the music - which is necessary so the local service can map local ids to Google Music ids.
+Next, the client clears the Google Music library, and manually populates the work queue with fake creations of every song in the library.
+
+Note that this requires re-uploading of all songs in the local library. This is necessary so that the service can associate local items with remote items.
 
 ###Continuous sync
-Now, the local service can take over. To make this cross-platform, I'm thinking of implementing the service as an RPC server running in Python. The server, once running, would accept commands to start syncing and stop syncing. While syncing, it polls the Changes table, then pushes out changes to Google Music. After a change is verified as successful, that row in the Changes table is deleted.
+Now, the service can take over. It continually polls the work queue for changes in the local library, and pushes them out as it was configured to. The syncing process can be started and stopped with a very simple tcp protocol.
+
+"Autoplaylists" that are stored as a query present a slight wrinkle. Since queries can use arbitrary song metadata that may not be syncing up to Google Music, the triggers may not detect every change in an autoplaylist's contents. These could then be handled either by persisting their contents and polling for a change, or simply by always assuming a change. The latter may be simpler when dealing with idempotent api functions.
 
 ###Detaching from the local database
-This would just remove the tables created in the attachment step. Resyncing after this point would require going through the entire process again (including re-uploading all the songs).
+This removes the tables and triggers from attaching. Setting up syncing again would involve re-uploading all music.
 
 - - -
 
