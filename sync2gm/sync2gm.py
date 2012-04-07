@@ -3,13 +3,6 @@
 """A server that syncs a local database to Google Music."""
 
 import collections
-import itertools
-#Enum recipe from SO: 
-# http://stackoverflow.com/a/1695250/1231454
-# def enum(*sequential, **named):
-#     enums = dict(zip(sequential, range(len(sequential))), **named)
-#     return type('Enum', (), enums)
-#CTypes = enum(itertools.product(["c", "u", "d"], ["Song", "Playlist"]))
 
 from gmusicapi import *
 from appdirs import AppDirs
@@ -21,7 +14,7 @@ from twisted.protocols.basic import LineReceiver
 #reactor.run()
 
 
-TriggerDef = collections.namedtuple('TriggerDef', ['name', 'table', 'when', 'idValText'])
+TriggerDef = collections.namedtuple('TriggerDef', ['name', 'table', 'when', 'id_text'])
 #when surrounded by eg
 # CREATE TRIGGER {name} when ON {table}
 
@@ -32,7 +25,7 @@ ConfigPair = collections.namedtuple('Config', ['trigger', 'handler'])
 #action: one of {'create', 'delete'}. Updates can just return an empty HandlerResult.
 #itemType: one of {'song', 'playlist'}
 #gmId: <string>
-HandlerResult = collections.namedtuple('HandlerResult', ['action', 'itemType', 'gmId'])
+HandlerResult = collections.namedtuple('HandlerResult', ['action', 'item_type', 'gm_id'])
 
 #Maps a local column to a piece of gm metadata.
 MDMapping = collections.namedtuple('MDMapping', ['col', 'gm_key', 'to_gm_form'])
