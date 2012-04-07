@@ -5,10 +5,10 @@
 
 import sqlite3
 import traceback #debugging
+import sys #sys.argv[]
 
-from sync2gm.sync2gm import TriggerDef, ConfigPair, HandlerResult, MDMapping, make_md_map, get_gms_id, get_gmp_id
-from gmusicapi import Api, CallFailure
-
+from sync2gm.sync2gm import TriggerDef, ConfigPair, HandlerResult, MDMapping, make_md_map, get_gms_id, get_gmp_id, ChangePollThread
+from gmusicapi import CallFailure
 
 #Define how to set up the connection, since MediaMonkey needs a custom collation function.
 #It won't allow string queries without it.
@@ -20,6 +20,7 @@ def make_connection(db_path):
         return cmp(s1.lower(), s2.lower())
 
     conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
     conn.create_collation('IUNICODE', iUnicodeCollate)
     #There are also USERLOCALE and NUMERICSTRING collations referred to here:
     #http://www.mediamonkey.com/wiki/index.php/MediaMonkey_Database_structure
@@ -125,6 +126,15 @@ def uPlaylistNameHandler(local_id, api, conn):
 
     api.change_playlist_name(get_gmp_id(local_id), playlist_data[0])
 
+def dPlaylistHandler(local_id, api, conn):
+    playlist_data = conn.execute("SELECT PlaylistName FROM Playlists WHERE IDPlaylist=?", (local_id,)).fetchone()
+
+    gm_pid = get_gmp_id(local_id)
+
+    api.delete_playlist(gm_pid)
+
+    return HandlerResult(action='delete', item_type='playlist', gm_id=gm_pid)    
+
 def changePlaylistHandler(local_id, api, conn):
     #All playlist updates are handled idempotently.
 
@@ -181,6 +191,14 @@ config = [
             when="AFTER UPDATE OF PlaylistName",
             id_text='new.IDPlaylist'),
         handler = uPlaylistNameHandler),
+
+    ConfigPair(
+        trigger = TriggerDef(
+            name='sync2gm_dPlaylist',
+            table='Playlists',
+            when='AFTER DELETE',
+            id_text='old.IDPlaylist'),
+        handler = dPlaylistHandler),
 
     #it would be possible to do delta updates by grabbing IDPlaylistSong instead.
     ConfigPair(
@@ -260,7 +278,7 @@ def drop_service_tables(conn):
         conn.execute("DROP TABLE IF EXISTS sync2gm_Changes")
             
 
-def setup(conn):
+def attach(conn):
     success = False
 
     try:
@@ -276,10 +294,25 @@ def setup(conn):
         success = False
         traceback.print_exc()
 
-        drop_service_tables(conn)
+        detach(conn)
 
+    finally:
+        return success
+
+def detach(conn):
+    success = False
+
+    try:
+        drop_service_tables(conn)
+        
         for triggerdef, handler in config:
-            drop_trigger(triggerdef, conn)
+            drop_trigger(triggerdef, conn)    
+
+        success = True
+
+    except sqlite3.Error:
+        success = False
+        traceback.print_exc()
         
     finally:
         return success
@@ -287,6 +320,17 @@ def setup(conn):
     
 if __name__ == '__main__':
 
-    conn = make_connection('MM.DB')
-    
-    print setup(conn)
+    if sys.argv[1] == "attach":
+        with make_connection(sys.argv[2]) as conn:
+            print attach(conn)
+    elif sys.argv[1] == "detach":
+        with make_connection(sys.argv[2]) as conn:
+            print detach(conn)
+    elif sys.argv[1] == "run":
+        t = ChangePollThread(make_connection, config, sys.argv[2])
+        t.start()
+        
+        raw_input("Running until you hit enter: ")
+        
+        t.stop()
+
