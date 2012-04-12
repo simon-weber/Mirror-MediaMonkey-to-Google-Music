@@ -5,6 +5,7 @@
 import collections
 import threading
 import time
+from contextlib import closing
 
 from gmusicapi import *
 import appdirs
@@ -126,12 +127,12 @@ class ChangePollThread(threading.Thread):
 
     def run(self):
 
-        read_for_change = True
+        read_new_changeid = True
         last_change_id = 0
 
         while self.active:
 
-            if read_for_change:
+            if read_new_changeid:
                 pass #for now
                # with open(self._config_dir) as f:
                #     last_change_id = int(f.readline()[:-1])
@@ -141,23 +142,34 @@ class ChangePollThread(threading.Thread):
 
             max_changes = 10
 
-            with self._make_conn(self._db) as conn:
-                cur = conn.cursor()
-                #this can fail out with "db locked" - we should keep retrying even though our timeout is long
-                cur.execute("SELECT changeId, changeType, localId FROM sync2gm_Changes")
+            #opening a new conn every time - not sure if this is desirable
+            with closing(self._make_conn(self._db)) as conn, closing(conn.cursor()) as cur:
+            
+                #continue to retry while db is locked
+                while 1:
+                    try:
+                        cur.execute("SELECT changeId, changeType, localId FROM sync2gm_Changes")
+                        break
+                    except sqlite3.Error as e:
+                        if "database is locked" in e.message:
+                            print "locked - retrying"
+                        else: raise
+                    
                 changes = cur.fetchmany(max_changes)
 
                 if len(changes) == 0:
-                    read_for_change = False
+                    read_new_changeid = False
                 else:
-                    read_for_change = True
+                    read_new_changeid = True
                     for change in changes:
-                        print change['changeId'], change['changeType'], change['localId']
+                        c_id, c_type, local_id = change
+                        print c_id, c_type, local_id
                         
-                        #push until
-                        #success: write out change to file, atomically
-                        #failure: log failure in plaintext
-                        #handlers[change['changeType']](change['localId'], self.api, conn)
+                        try:
+                            self.handlers[cType](local_id, self.api, conn)
+                            #write out success atomically
+                        except CallFailure as cf:
+                            pass #log failure
             
             time.sleep(5) 
 
