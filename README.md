@@ -37,5 +37,5 @@ This removes the tables and triggers from attaching. Setting up syncing again wo
 - - -
 
 
-Copyright 2012 [Simon Weber](https://plus.google.com/103350848301234480355).  
+Copyright 2012 [Simon Weber](http://www.simonmweber.com).  
 Licensed under the 3-clause BSD. See COPYING.
