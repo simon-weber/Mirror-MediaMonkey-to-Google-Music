@@ -19,7 +19,7 @@ def make_connection(db_path):
     def iUnicodeCollate(s1, s2):
         return cmp(s1.lower(), s2.lower())
 
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path, timeout=60) #MM locks the database for an obscenely long time
     conn.row_factory = sqlite3.Row
     conn.create_collation('IUNICODE', iUnicodeCollate)
     #There are also USERLOCALE and NUMERICSTRING collations referred to here:

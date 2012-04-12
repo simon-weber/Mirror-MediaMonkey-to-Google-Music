@@ -143,6 +143,7 @@ class ChangePollThread(threading.Thread):
 
             with self._make_conn(self._db) as conn:
                 cur = conn.cursor()
+                #this can fail out with "db locked" - we should keep retrying even though our timeout is long
                 cur.execute("SELECT changeId, changeType, localId FROM sync2gm_Changes")
                 changes = cur.fetchmany(max_changes)
 
