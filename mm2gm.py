@@ -327,7 +327,7 @@ if __name__ == '__main__':
         with make_connection(sys.argv[2]) as conn:
             print detach(conn)
     elif sys.argv[1] == "run":
-        t = ChangePollThread(make_connection, config, sys.argv[2])
+        t = ChangePollThread(make_connection, config, sys.argv[2], 'default')
         t.start()
         
         raw_input("Running until you hit enter: ")

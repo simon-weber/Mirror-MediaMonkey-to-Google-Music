@@ -7,7 +7,7 @@ import threading
 import time
 
 from gmusicapi import *
-from appdirs import AppDirs
+import appdirs
 
 class MockApi(Api):
     def _wc_call(self, service_name, *args, **kw):
@@ -19,8 +19,6 @@ class MockApi(Api):
 
         #just log the request
         self.log.debug("wc_call %s %s", service_name, args)
-
-#AppDirs("SuperApp", "Acme")
 
 #from twisted.internet.protocol import Factory
 #from twisted.protocols.basic import LineReceiver
@@ -102,11 +100,12 @@ class MockApi(Api):
         self.log.debug("wc_call %s %s", service_name, args)
 
 class ChangePollThread(threading.Thread):
-    def __init__(self, make_conn, handlers, db_file):
+    def __init__(self, make_conn, handlers, db_file, lib_name):
         threading.Thread.__init__(self)
         self._running = threading.Event()
         self._make_conn = make_conn
         self._db = db_file
+        self._config_dir = appdirs.user_data_dir(appname='mm2gm', appauthor='Simon Weber', version=lib_name)
 
         self.handlers = handlers
         self.activate() #we won't run until start()ed
@@ -126,26 +125,43 @@ class ChangePollThread(threading.Thread):
         return self._running.isSet()
 
     def run(self):
-        with self._make_conn(self._db) as conn:
-            while self.active:
-                with conn:
-                    r = conn.execute("SELECT changeId, changeType, localId FROM sync2gm_Changes").fetchone()
+
+        read_for_change = True
+        last_change_id = 0
+
+        while self.active:
+
+            if read_for_change:
+                pass #for now
+               # with open(self._config_dir) as f:
+               #     last_change_id = int(f.readline()[:-1])
+
+            #Buffer in changes to memory.
+            #The limit is intended to limit risk of losing changes.
+
+            max_changes = 10
+
+            with self._make_conn(self._db) as conn:
+                cur = conn.cursor()
+                cur.execute("SELECT changeId, changeType, localId FROM sync2gm_Changes")
+                changes = cur.fetchmany(max_changes)
+
+                if len(changes) == 0:
+                    read_for_change = False
+                else:
+                    read_for_change = True
+                    for change in changes:
+                        print change['changeId'], change['changeType'], change['localId']
+                        
+                        #push until
+                        #success: write out change to file, atomically
+                        #failure: log failure in plaintext
+                        #handlers[change['changeType']](change['localId'], self.api, conn)
             
-                #If no changes, sleep then poll again.
-                if not r:
-                    print "sleeping"
-                    time.sleep(5)
-                    continue
+            time.sleep(5) 
 
-                #As long as we have changes, continually send them out.
-                print "found change: ",
-                print r['changeId'], r['changeType']
 
-                #remove change
-                with conn:
-                    conn.execute("DELETE FROM sync2gm_Changes WHERE changeId=?", (r['changeId'],))
-        
-        
+
 
 
 # class GMSyncProtocol(LineReceiver):
