@@ -5,7 +5,9 @@
 import collections
 import threading
 import time
+import contextlib
 from contextlib import closing
+import os
 
 from gmusicapi import *
 import appdirs
@@ -64,6 +66,46 @@ class UnmappedId(Exception):
     pass
 
 
+@contextlib.contextmanager
+def backed_up(filename):
+    """Context manager to back up a file and remove the backup.
+
+    *filename*.bak will be overwritten if it exists.
+    """
+
+    exists = os.path.isfile(filename)
+    bak_name = filename+'.bak'
+
+    if exists: os.rename(filename, bak_name)
+    try:
+        yield
+        #if we terminate unexpectedly (eg a reboot), 
+        # the backup will remain
+    finally:
+        if exists: os.remove(bak_name)
+
+def atomic_write(filename, text):
+    """Return True if *filename* is overwritten with *text* successfully. The write will be atomic.
+
+    *filename*.tmp may be overwritten.
+    """
+
+    tmp_name = filename+'.tmp'
+
+    try:
+        with open(tmp_name, 'w') as tmp:
+            tmp.write(text)
+
+        #this _should_ be atomic cross-platform
+        with backed_up(filename):
+            os.rename(tmp_name, filename)            
+
+    except Exception as e:
+        #TODO warn that bak may be able to be restored.
+        return False
+
+    return True
+
 def get_gms_id(localId):
     """Return the GM song id associated with this *localId*, or None."""
     return _get_gm_id(localId, 'song')
@@ -107,6 +149,7 @@ class ChangePollThread(threading.Thread):
         self._make_conn = make_conn
         self._db = db_file
         self._config_dir = appdirs.user_data_dir(appname='mm2gm', appauthor='Simon Weber', version=lib_name)
+        self._change_file = self._config_dir + 'last_change'
 
         self.handlers = handlers
         self.activate() #we won't run until start()ed
@@ -133,13 +176,11 @@ class ChangePollThread(threading.Thread):
         while self.active:
 
             if read_new_changeid:
-                pass #for now
-               # with open(self._config_dir) as f:
-               #     last_change_id = int(f.readline()[:-1])
+               with open(self._change_file) as f:
+                   last_change_id = int(f.readline()[:-1])
 
             #Buffer in changes to memory.
             #The limit is intended to limit risk of losing changes.
-
             max_changes = 10
 
             #opening a new conn every time - not sure if this is desirable
@@ -157,19 +198,24 @@ class ChangePollThread(threading.Thread):
                     
                 changes = cur.fetchmany(max_changes)
 
-                if len(changes) == 0:
+                if len(changes) is 0:
                     read_new_changeid = False
                 else:
                     read_new_changeid = True
+
                     for change in changes:
                         c_id, c_type, local_id = change
                         print c_id, c_type, local_id
                         
                         try:
                             self.handlers[cType](local_id, self.api, conn)
-                            #write out success atomically
+                            
+                            if not atomic_write(self._change_file): pass #log failure in writing out change
                         except CallFailure as cf:
-                            pass #log failure
+                            pass #log failure to update; this is a big deal
+
+                        
+        
             
             time.sleep(5) 
 
