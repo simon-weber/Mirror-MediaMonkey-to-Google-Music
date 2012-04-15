@@ -80,7 +80,7 @@ mm_sql_cols = repr(tuple(col_to_mdm.keys())).replace("'","")[1:-1]
 #All handlers that create/delete remote items must return a HandlerResult.
 #This allows the service to keep track of local -> remote mappings.
 
-def cSongHandler(local_id, api, conn):
+def cSongHandler(local_id, api, conn, get_gms_id, get_gmp_id):
     conn.execute("SELECT SongPath from Songs WHERE ID=?", (local_id,))
     path = conn.fetchone()
 
@@ -92,28 +92,29 @@ def cSongHandler(local_id, api, conn):
     return HandlerResult(action='create', item_type='song', gm_id=new_ids[path])
 
 
-def uSongHandler(local_id, api, conn):
+def uSongHandler(local_id, api, conn, get_gms_id, get_gmp_id):
     mm_md = conn.execute("SELECT %s FROM Songs WHERE ID=?" % mm_sql_cols, (local_id,)).fetchone()
 
     gm_song = {}
     for col in mm_md.keys():
-        mdm = mm_to_mdm[col]
+        mdm = col_to_mdm[col]
 
         gm_key = mdm.gm_key
-        data = mdm.translate(mm_md)
+        data = mdm.to_gm_form(mm_md)
 
         gm_song[gm_key] = data
 
-    gm_song['id'] = get_gms_id(local_id)
+    gm_song['id'] = get_gms_id(local_id, conn)
 
-    api.change_song_metadata(gm_song) #TODO should switch this to a safer method
+    print "metadata update"
+    #api.change_song_metadata(gm_song) #TODO should switch this to a safer method
     
-def dSongHandler(local_id, api, conn):
-    delIds = api.delete_songs(get_gms_id(local_id))
+def dSongHandler(local_id, api, conn, get_gms_id, get_gmp_id):
+    delIds = api.delete_songs(get_gms_id(local_id, conn))
 
     return HandlerResult(action='delete', item_type='song', gm_id=delIds[0])
 
-def cPlaylistHandler(local_id, api, conn):
+def cPlaylistHandler(local_id, api, conn, get_gms_id, get_gmp_id):
     #currently assuming that this is called prior to any inserts on PlaylistSongs
     playlist_data = conn.execute("SELECT PlaylistName FROM Playlists WHERE IDPlaylist=?", (local_id,)).fetchone()
 
@@ -121,21 +122,21 @@ def cPlaylistHandler(local_id, api, conn):
 
     return HandlerResult(action='create', item_type='playlist', gm_id=new_gm_pid)
 
-def uPlaylistNameHandler(local_id, api, conn):
+def uPlaylistNameHandler(local_id, api, conn, get_gms_id, get_gmp_id):
     playlist_data = conn.execute("SELECT PlaylistName FROM Playlists WHERE IDPlaylist=?", (local_id,)).fetchone()
 
-    api.change_playlist_name(get_gmp_id(local_id), playlist_data[0])
+    api.change_playlist_name(get_gmp_id(local_id, conn), playlist_data[0])
 
-def dPlaylistHandler(local_id, api, conn):
+def dPlaylistHandler(local_id, api, conn, get_gms_id, get_gmp_id):
     playlist_data = conn.execute("SELECT PlaylistName FROM Playlists WHERE IDPlaylist=?", (local_id,)).fetchone()
 
-    gm_pid = get_gmp_id(local_id)
+    gm_pid = get_gmp_id(local_id, conn)
 
     api.delete_playlist(gm_pid)
 
     return HandlerResult(action='delete', item_type='playlist', gm_id=gm_pid)    
 
-def changePlaylistHandler(local_id, api, conn):
+def changePlaylistHandler(local_id, api, conn, get_gms_id, get_gmp_id):
     #All playlist updates are handled idempotently.
 
     #Get all the songs now in the playlist.
@@ -146,7 +147,7 @@ def changePlaylistHandler(local_id, api, conn):
     for r in song_rows:
         pl.append(r[0])
 
-    api.change_playlist(get_gmp_id(local_id), pl)
+    api.change_playlist(get_gmp_id(local_id, conn), pl)
 
 
 config = [
@@ -250,20 +251,9 @@ def drop_trigger(triggerdef, conn):
     with conn:
         conn.execute("DROP TRIGGER IF EXISTS {name}".format(name=triggerdef.name))
 
+#this is just one table now
 def create_service_tables(conn, numTriggers):
     with conn:
-        conn.execute(
-            """CREATE TABLE sync2gm_GMSongIds(
-localId INTEGER PRIMARY KEY REFERENCES Songs(ID),
-gmId TEXT NOT NULL
-)""")
-
-        conn.execute(
-            """CREATE TABLE sync2gm_GMPlaylistIds(
-localId INTEGER PRIMARY KEY REFERENCES Playlists(IDPlaylist),
-gmId TEXT NOT NULL
-)""")
-
         conn.execute(
             """CREATE TABLE sync2gm_Changes(
 changeId INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
@@ -273,8 +263,6 @@ localId INTEGER NOT NULL
 
 def drop_service_tables(conn):
     with conn:
-        conn.execute("DROP TABLE IF EXISTS sync2gm_GMSongIds")
-        conn.execute("DROP TABLE IF EXISTS sync2gm_GMPlaylistIds")
         conn.execute("DROP TABLE IF EXISTS sync2gm_Changes")
             
 
@@ -327,7 +315,7 @@ if __name__ == '__main__':
         with make_connection(sys.argv[2]) as conn:
             print detach(conn)
     elif sys.argv[1] == "run":
-        t = ChangePollThread(make_connection, config, sys.argv[2], 'default')
+        t = ChangePollThread(make_connection, [c.handler for c in config], sys.argv[2], 'default')
         t.start()
         
         raw_input("Running until you hit enter: ")

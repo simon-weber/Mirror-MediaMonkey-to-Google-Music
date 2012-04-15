@@ -6,11 +6,15 @@ import collections
 import threading
 import time
 import contextlib
+from functools import partial
 from contextlib import closing
 import os
 
 from gmusicapi import *
 import appdirs
+
+#Keys are HandlerResult.item_types, values are the names of the id mapping databases.
+item_to_table = {'song': 'GMSongIds', 'playlist': 'GMPlaylistIds'}
 
 class MockApi(Api):
     def _wc_call(self, service_name, *args, **kw):
@@ -21,7 +25,7 @@ class MockApi(Api):
         """
 
         #just log the request
-        self.log.debug("wc_call %s %s", service_name, args)
+        self.log.warning("wc_call %s %s", service_name, args)
 
 #from twisted.internet.protocol import Factory
 #from twisted.protocols.basic import LineReceiver
@@ -94,7 +98,7 @@ def atomic_write(filename, text):
 
     try:
         with open(tmp_name, 'w') as tmp:
-            tmp.write(text)
+            tmp.write(str(text))
 
         #this _should_ be atomic cross-platform
         with backed_up(filename):
@@ -102,30 +106,11 @@ def atomic_write(filename, text):
 
     except Exception as e:
         #TODO warn that bak may be able to be restored.
+        raise #debug
         return False
 
+
     return True
-
-def get_gms_id(localId):
-    """Return the GM song id associated with this *localId*, or None."""
-    return _get_gm_id(localId, 'song')
-
-def get_gmp_id(localId):
-    """Return the GM playlist id associated with this *localId*, or None."""
-    return _get_gm_id(localId, 'playlist')
-
-def _get_gm_id(localId, itemType):
-    #Conn needs to come from the service
-    if itemType == 'song':
-        table='sync2gm_GMSongIds'
-    else:
-        table='sync2gm_GMPlaylistIds'
-
-    gmId = conn.execute("SELECT gmId FROM %s WHERE localId=?" % table, (localId,)).fetchone()
-    
-    if not gmId: raise UnmappedId
-    
-    return gmId[0]
 
 class MockApi(Api):
 
@@ -141,15 +126,42 @@ class MockApi(Api):
 
         #just log the request
         self.log.debug("wc_call %s %s", service_name, args)
+        return {'id': 'test'} #super hack
 
 class ChangePollThread(threading.Thread):
-    def __init__(self, make_conn, handlers, db_file, lib_name):
+    def __init__(self, make_conn, handlers, db_file, lib_name): #probably want something like "init" here to drop/create fresh map tables
+        #Most of this should eventually be pulled into protocol.
         threading.Thread.__init__(self)
         self._running = threading.Event()
         self._make_conn = make_conn
         self._db = db_file
         self._config_dir = appdirs.user_data_dir(appname='mm2gm', appauthor='Simon Weber', version=lib_name)
-        self._change_file = self._config_dir + 'last_change'
+        #Ensure the setting dir exists.
+        if not os.path.isdir(self._config_dir):
+            os.makedirs(self._config_dir)
+        
+        self._change_file = self._config_dir + os.sep + 'last_change'
+
+
+        id_db_loc = self._config_dir + os.sep + 'gmids.db'
+        self._gmid_conn = sqlite3.connect(id_db_loc)
+
+        #Ensure the id mapping tables exist.
+        #keep in mind the init note above
+        with self._gmid_conn as conn:
+            for table in item_to_table.values():
+                conn.execute(
+                    """CREATE TABLE IF NOT EXIST {tablename}(
+localId INTEGER PRIMARY KEY,
+gmId TEXT NOT NULL
+)""".format(tablename=table))
+
+        
+        #Ensure the change file had something in it.
+        if not os.path.isfile(self._change_file):
+            with open(self._change_file, mode='w') as f:
+                f.write("0")
+            
 
         self.handlers = handlers
         self.activate() #we won't run until start()ed
@@ -168,16 +180,43 @@ class ChangePollThread(threading.Thread):
     def active(self):
         return self._running.isSet()
 
+    def _get_gm_id(localId, item_type):
+        gm_id = self._gmid_conn.execute("SELECT gmId FROM %s WHERE localId=?" % item_to_table[item_type], (localId,)).fetchone()
+
+        if not gm_id: raise UnmappedId
+
+        return gm_id[0]
+
+    def update_id_mapping(handler_res):
+        """Update the local to remote id mapping database with a HandlerResult (*handler_res*)."""
+        action, item_type, gm_id = handler_res
+
+        #two switches for the different events; they're too dissimilar to factor out
+        if action == 'create':
+            comm = "INSERT INTO {table} (localId, gmId) VALUES ()" #i think we want to replace here
+
+        
+        # with self.gmid_conn as conn:
+        #     conn.execute("{action} INTO ")
+        
+                    
+
+              
+
+        
+        
+
     def run(self):
 
-        read_new_changeid = True
-        last_change_id = 0
+        read_new_changeid = True #assumes a changeid exists. currently fulfilled in __init__
 
         while self.active:
 
             if read_new_changeid:
                with open(self._change_file) as f:
-                   last_change_id = int(f.readline()[:-1])
+                   last_change_id = int(f.readline().strip())
+                   
+            print "polling. last change:", last_change_id
 
             #Buffer in changes to memory.
             #The limit is intended to limit risk of losing changes.
@@ -189,7 +228,7 @@ class ChangePollThread(threading.Thread):
                 #continue to retry while db is locked
                 while 1:
                     try:
-                        cur.execute("SELECT changeId, changeType, localId FROM sync2gm_Changes")
+                        cur.execute("SELECT changeId, changeType, localId FROM sync2gm_Changes WHERE changeId > ?", (last_change_id,))
                         break
                     except sqlite3.Error as e:
                         if "database is locked" in e.message:
@@ -208,11 +247,23 @@ class ChangePollThread(threading.Thread):
                         print c_id, c_type, local_id
                         
                         try:
-                            self.handlers[cType](local_id, self.api, conn)
-                            
-                            if not atomic_write(self._change_file): pass #log failure in writing out change
+                            res = self.handlers[c_type](local_id, self.api, conn, 
+                                                        get_gms_id = partial(self._get_gm_id, item_type='song'),
+                                                        get_gmp_id = partial(self._get_gm_id, item_type='playlist'))
+                            #When the handler created a remote object, update our local mappings.
+                            if res is not None: self.update_gm_ids(res)
+
                         except CallFailure as cf:
-                            pass #log failure to update; this is a big deal
+                            print "call failure!" #log failure to update; this is a big deal
+                        except Exception as e:
+                            #for debugging
+                            print "exception while pushing change"
+                            print e.message
+                        finally: #mark this change as pushed out
+                            if not atomic_write(self._change_file, c_id): 
+                                print "failed to write out change!"
+
+                            
 
                         
         
