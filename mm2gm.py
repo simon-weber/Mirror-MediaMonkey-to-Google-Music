@@ -7,7 +7,7 @@ import sqlite3
 import traceback #debugging
 import sys #sys.argv[]
 
-from sync2gm.sync2gm import TriggerDef, ConfigPair, HandlerResult, MDMapping, make_md_map, get_gms_id, get_gmp_id, ChangePollThread
+from sync2gm.sync2gm import TriggerDef, ConfigPair, HandlerResult, MDMapping, make_md_map, ChangePollThread
 from gmusicapi import CallFailure
 
 #Define how to set up the connection, since MediaMonkey needs a custom collation function.
@@ -81,8 +81,7 @@ mm_sql_cols = repr(tuple(col_to_mdm.keys())).replace("'","")[1:-1]
 #This allows the service to keep track of local -> remote mappings.
 
 def cSongHandler(local_id, api, conn, get_gms_id, get_gmp_id):
-    conn.execute("SELECT SongPath from Songs WHERE ID=?", (local_id,))
-    path = conn.fetchone()
+    path = conn.execute("SELECT SongPath from Songs WHERE ID=?", (local_id,)).fetchone()
 
     new_ids = api.upload(path)
 
@@ -104,13 +103,13 @@ def uSongHandler(local_id, api, conn, get_gms_id, get_gmp_id):
 
         gm_song[gm_key] = data
 
-    gm_song['id'] = get_gms_id(local_id, conn)
+    gm_song['id'] = get_gms_id(local_id)
 
     print "metadata update"
     #api.change_song_metadata(gm_song) #TODO should switch this to a safer method
     
 def dSongHandler(local_id, api, conn, get_gms_id, get_gmp_id):
-    delIds = api.delete_songs(get_gms_id(local_id, conn))
+    delIds = api.delete_songs(get_gms_id(local_id))
 
     return HandlerResult(action='delete', item_type='song', gm_id=delIds[0])
 
@@ -125,12 +124,12 @@ def cPlaylistHandler(local_id, api, conn, get_gms_id, get_gmp_id):
 def uPlaylistNameHandler(local_id, api, conn, get_gms_id, get_gmp_id):
     playlist_data = conn.execute("SELECT PlaylistName FROM Playlists WHERE IDPlaylist=?", (local_id,)).fetchone()
 
-    api.change_playlist_name(get_gmp_id(local_id, conn), playlist_data[0])
+    api.change_playlist_name(get_gmp_id(local_id), playlist_data[0])
 
 def dPlaylistHandler(local_id, api, conn, get_gms_id, get_gmp_id):
     playlist_data = conn.execute("SELECT PlaylistName FROM Playlists WHERE IDPlaylist=?", (local_id,)).fetchone()
 
-    gm_pid = get_gmp_id(local_id, conn)
+    gm_pid = get_gmp_id(local_id)
 
     api.delete_playlist(gm_pid)
 
@@ -147,8 +146,9 @@ def changePlaylistHandler(local_id, api, conn, get_gms_id, get_gmp_id):
     for r in song_rows:
         pl.append(r[0])
 
-    api.change_playlist(get_gmp_id(local_id, conn), pl)
+    api.change_playlist(get_gmp_id(local_id), pl)
 
+#item types should be added to handler, so we don't have to pass them around all the time
 
 config = [
     #Song config

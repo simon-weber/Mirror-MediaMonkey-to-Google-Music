@@ -9,6 +9,8 @@ import contextlib
 from functools import partial
 from contextlib import closing
 import os
+import sqlite3
+import traceback
 
 from gmusicapi import *
 import appdirs
@@ -44,7 +46,7 @@ ConfigPair = collections.namedtuple('Config', ['trigger', 'handler'])
 #Holds the result from a handler, so the service can keep local -> remote mapping up to date.
 #action: one of {'create', 'delete'}. Updates can just return an empty HandlerResult.
 #itemType: one of {'song', 'playlist'}
-#gmId: <string>
+#gm_id: <string>
 HandlerResult = collections.namedtuple('HandlerResult', ['action', 'item_type', 'gm_id'])
 
 #Maps a local column to a piece of gm metadata.
@@ -151,7 +153,7 @@ class ChangePollThread(threading.Thread):
         with self._gmid_conn as conn:
             for table in item_to_table.values():
                 conn.execute(
-                    """CREATE TABLE IF NOT EXIST {tablename}(
+                    """CREATE TABLE IF NOT EXISTS {tablename}(
 localId INTEGER PRIMARY KEY,
 gmId TEXT NOT NULL
 )""".format(tablename=table))
@@ -181,29 +183,35 @@ gmId TEXT NOT NULL
         return self._running.isSet()
 
     def _get_gm_id(localId, item_type):
-        gm_id = self._gmid_conn.execute("SELECT gmId FROM %s WHERE localId=?" % item_to_table[item_type], (localId,)).fetchone()
+        with conn as self._gmid_conn:
+            conn.execute("SELECT gmId FROM %s WHERE localId=?" % item_to_table[item_type], (localId,))
+            gm_id = conn.fetchone()
+
 
         if not gm_id: raise UnmappedId
 
         return gm_id[0]
 
-    def update_id_mapping(handler_res):
+    def update_id_mapping(local_id, handler_res):
         """Update the local to remote id mapping database with a HandlerResult (*handler_res*)."""
         action, item_type, gm_id = handler_res
 
         #two switches for the different events; they're too dissimilar to factor out
         if action == 'create':
-            comm = "INSERT INTO {table} (localId, gmId) VALUES ()" #i think we want to replace here
+            command = "REPLACE INTO {table} (localId, gmId) VALUES (?, ?)"
+            values = (local_id, gm_id)
+        elif action == 'delete':
+            command = "DELETE FROM {table} WHERE localId=?"
+            values = (local_id,)
+        else:
+            raise Exception("Unknown HandlerResult.action")
 
-        
-        # with self.gmid_conn as conn:
-        #     conn.execute("{action} INTO ")
-        
-                    
+        command = command.format(table=item_to_table[item_type])
 
-              
 
-        
+        #capture/log failure?
+        with self.gmid_conn as conn:
+            conn.execute(command, values)
         
 
     def run(self):
@@ -251,7 +259,7 @@ gmId TEXT NOT NULL
                                                         get_gms_id = partial(self._get_gm_id, item_type='song'),
                                                         get_gmp_id = partial(self._get_gm_id, item_type='playlist'))
                             #When the handler created a remote object, update our local mappings.
-                            if res is not None: self.update_gm_ids(res)
+                            if res is not None: self.update_id_mapping(local_id, res)
 
                         except CallFailure as cf:
                             print "call failure!" #log failure to update; this is a big deal
@@ -259,6 +267,7 @@ gmId TEXT NOT NULL
                             #for debugging
                             print "exception while pushing change"
                             print e.message
+                            print traceback.format_exc()
                         finally: #mark this change as pushed out
                             if not atomic_write(self._change_file, c_id): 
                                 print "failed to write out change!"
