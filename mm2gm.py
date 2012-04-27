@@ -66,6 +66,23 @@ for mdm in md_mappings:
 #Get the mm cols into sql col format; col place holders aren't allowed.
 mm_sql_cols = repr(tuple(col_to_mdm.keys())).replace("'","")[1:-1]
 
+def get_path(local_id, conn):
+    """Return the full file path of this item, or raise UnmappedId. Only works for local items (eg not with media servers)."""
+    path, f_id = conn.execute("SELECT SongPath, IDFolder from Songs WHERE ID=?", (local_id,)).fetchone()
+    #MM separates the path and media, so we need to get the drive letter separately.
+    d_letter = conn.execute("SELECT DriveLetter FROM Medias WHERE IDMedia=(SELECT IDMedia FROM Folders WHERE IDFolder=?)", (f_id,)).fetchone()
+    if path is not None and d_letter is not None:
+        #d_letter is an int that needs to be coerced into the right char.
+        #MM docs are inspecific, so we always coerce into ascii cap letter range.
+        if d_letter < 26: d_letter = chr(d_letter + 65) #assumed given a 0-25 ord
+        elif d_letter > 90: d_letter = chr(d_letter - 32) #assumed given a lowercase ascii
+        else: raise UnmappedId
+
+        return d_letter + path
+    else:
+        raise UnmappedId
+
+
 
 #define handlers.
 #These receive three args: local_id, api (an already authenticated gmusicapi) and conn (an sqlite3 connection).
@@ -81,7 +98,7 @@ mm_sql_cols = repr(tuple(col_to_mdm.keys())).replace("'","")[1:-1]
 #This allows the service to keep track of local -> remote mappings.
 
 def cSongHandler(local_id, api, conn, get_gms_id, get_gmp_id):
-    path = conn.execute("SELECT SongPath from Songs WHERE ID=?", (local_id,)).fetchone()
+    path = get_path(local_id, conn)
 
     new_ids = api.upload(path)
 
