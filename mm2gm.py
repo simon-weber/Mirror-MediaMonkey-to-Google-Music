@@ -6,6 +6,8 @@
 import sqlite3
 import traceback #debugging
 import sys #sys.argv[]
+import functools
+from contextlib import closing
 
 from sync2gm.sync2gm import TriggerDef, ConfigPair, HandlerResult, MDMapping, make_md_map, ChangePollThread
 from gmusicapi import CallFailure
@@ -26,6 +28,25 @@ def make_connection(db_path):
     #http://www.mediamonkey.com/wiki/index.php/MediaMonkey_Database_structure
 
     return conn
+
+def handler(f):
+    """A wrapper to perform handler init."""
+    
+    @functools.wraps(f)
+    def wrapper(*args, **kwargs):
+        #Set up our db connection for this handler instance.
+        make_conn, make_gmid_conn, get_gms_id, get_gmp_id = [kwargs[k] for k in ('make_conn', 'make_gmid_conn', 'get_gms_id', 'get_gmp_id')]
+        with closing(make_conn()) as conn, closing(make_gmid_conn()) as gmid_conn:
+            cur = conn.cursor()
+            id_cur = gmid_conn.cursor()
+
+            get_gms_id = functools.partial(get_gms_id, cur=id_cur)
+            get_gmp_id = functools.partial(get_gmp_id, cur=id_cur)
+
+            return f(*(args+(cur, get_gms_id, get_gmp_id)))
+
+    return wrapper
+  
 
 #Define metadata mapping.
 def to_gm_rating(r):
@@ -97,8 +118,8 @@ def get_path(local_id, cur):
 #All handlers that create/delete remote items must return a HandlerResult.
 #This allows the service to keep track of local -> remote mappings.
 
-def cSongHandler(local_id, api, make_conn, get_gms_id, get_gmp_id):
-    cur = make_conn().cursor()
+@handler
+def cSongHandler(local_id, api, cur, get_gms_id, get_gmp_id):
     path = get_path(local_id, cur)
 
     new_ids = api.upload(path)
@@ -109,8 +130,8 @@ def cSongHandler(local_id, api, make_conn, get_gms_id, get_gmp_id):
     return HandlerResult(action='create', item_type='song', gm_id=new_ids[path])
 
 
-def uSongHandler(local_id, api, make_conn, get_gms_id, get_gmp_id):
-    cur = make_conn().cursor()
+@handler
+def uSongHandler(local_id, api, cur, get_gms_id, get_gmp_id):
     mm_md = cur.execute("SELECT %s FROM Songs WHERE ID=?" % mm_sql_cols, (local_id,)).fetchone()
 
     gm_song = {}
@@ -125,30 +146,31 @@ def uSongHandler(local_id, api, make_conn, get_gms_id, get_gmp_id):
     gm_song['id'] = get_gms_id(local_id)
 
     print "metadata update"
-    #api.change_song_metadata(gm_song) #TODO should switch this to a safer method
+    #api.change_song_metadata(gm_song) TODO should switch this to a safer method
     
-def dSongHandler(local_id, api, make_conn, get_gms_id, get_gmp_id):
+@handler
+def dSongHandler(local_id, api, cur, get_gms_id, get_gmp_id):
     delIds = api.delete_songs(get_gms_id(local_id))
 
     return HandlerResult(action='delete', item_type='song', gm_id=delIds[0])
 
-def cPlaylistHandler(local_id, api, make_conn, get_gms_id, get_gmp_id):
+@handler
+def cPlaylistHandler(local_id, api, cur, get_gms_id, get_gmp_id):
     #currently assuming that this is called prior to any inserts on PlaylistSongs
-    cur = make_conn().cursor()
     playlist_data = cur.execute("SELECT PlaylistName FROM Playlists WHERE IDPlaylist=?", (local_id,)).fetchone()
 
     new_gm_pid = api.create_playlist(playlist_data[0])
 
     return HandlerResult(action='create', item_type='playlist', gm_id=new_gm_pid)
 
-def uPlaylistNameHandler(local_id, api, make_conn, get_gms_id, get_gmp_id):
-    cur = make_conn().cursor()
+@handler
+def uPlaylistNameHandler(local_id, api, cur, get_gms_id, get_gmp_id):
     playlist_data = cur.execute("SELECT PlaylistName FROM Playlists WHERE IDPlaylist=?", (local_id,)).fetchone()
 
     api.change_playlist_name(get_gmp_id(local_id), playlist_data[0])
 
-def dPlaylistHandler(local_id, api, make_conn, get_gms_id, get_gmp_id):
-    cur = make_conn().cursor()
+@handler
+def dPlaylistHandler(local_id, api, cur, get_gms_id, get_gmp_id):
     playlist_data = cur.execute("SELECT PlaylistName FROM Playlists WHERE IDPlaylist=?", (local_id,)).fetchone()
 
     gm_pid = get_gmp_id(local_id)
@@ -157,8 +179,8 @@ def dPlaylistHandler(local_id, api, make_conn, get_gms_id, get_gmp_id):
 
     return HandlerResult(action='delete', item_type='playlist', gm_id=gm_pid)    
 
-def changePlaylistHandler(local_id, api, make_conn, get_gms_id, get_gmp_id):
-    cur = make_conn().cursor()
+@handler
+def changePlaylistHandler(local_id, api, cur, get_gms_id, get_gmp_id):
     #All playlist updates are handled idempotently.
 
     #Get all the songs now in the playlist.

@@ -146,11 +146,11 @@ class ChangePollThread(threading.Thread):
 
 
         id_db_loc = self._config_dir + os.sep + 'gmids.db'
-        self._gmid_conn = sqlite3.connect(id_db_loc)
+        self.make_gmid_conn = partial(sqlite3.connect, id_db_loc)
 
         #Ensure the id mapping tables exist.
         #keep in mind the init note above
-        with self._gmid_conn as conn:
+        with closing(self.make_gmid_conn()) as conn:
             for table in item_to_table.values():
                 conn.execute(
                     """CREATE TABLE IF NOT EXISTS {tablename}(
@@ -209,7 +209,7 @@ gmId TEXT NOT NULL
 
 
         #capture/log failure?
-        with self.gmid_conn as conn:
+        with closing(self.make_gmid_conn()) as conn:
             conn.execute(command, values)
         
 
@@ -254,7 +254,8 @@ gmId TEXT NOT NULL
                         print c_id, c_type, local_id
                         
                         try:
-                            res = self.handlers[c_type](local_id, self.api, self.make_conn, 
+                            res = self.handlers[c_type](local_id, self.api, make_conn=self.make_conn, 
+                                                        make_gmid_conn=self.make_gmid_conn,
                                                         get_gms_id = partial(self._get_gm_id, item_type='song'),
                                                         get_gmp_id = partial(self._get_gm_id, item_type='playlist'))
                             #When the handler created a remote object, update our local mappings.
