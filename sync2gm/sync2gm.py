@@ -135,8 +135,8 @@ class ChangePollThread(threading.Thread):
         #Most of this should eventually be pulled into protocol.
         threading.Thread.__init__(self)
         self._running = threading.Event()
-        self._make_conn = make_conn
         self._db = db_file
+        self.make_conn = partial(make_conn, self._db)
         self._config_dir = appdirs.user_data_dir(appname='mm2gm', appauthor='Simon Weber', version=lib_name)
         #Ensure the setting dir exists.
         if not os.path.isdir(self._config_dir):
@@ -182,17 +182,16 @@ gmId TEXT NOT NULL
     def active(self):
         return self._running.isSet()
 
-    def _get_gm_id(localId, item_type):
-        with conn as self._gmid_conn:
-            conn.execute("SELECT gmId FROM %s WHERE localId=?" % item_to_table[item_type], (localId,))
-            gm_id = conn.fetchone()
+    def _get_gm_id(self, localId, item_type, cur):
+        cur.execute("SELECT gmId FROM %s WHERE localId=?" % item_to_table[item_type], (localId,))
+        gm_id = cur.fetchone()
 
 
         if not gm_id: raise UnmappedId
 
         return gm_id[0]
 
-    def update_id_mapping(local_id, handler_res):
+    def update_id_mapping(self, local_id, handler_res):
         """Update the local to remote id mapping database with a HandlerResult (*handler_res*)."""
         action, item_type, gm_id = handler_res
 
@@ -231,7 +230,7 @@ gmId TEXT NOT NULL
             max_changes = 10
 
             #opening a new conn every time - not sure if this is desirable
-            with closing(self._make_conn(self._db)) as conn, closing(conn.cursor()) as cur:
+            with closing(self.make_conn()) as conn, closing(conn.cursor()) as cur:
             
                 #continue to retry while db is locked
                 while 1:
@@ -255,7 +254,7 @@ gmId TEXT NOT NULL
                         print c_id, c_type, local_id
                         
                         try:
-                            res = self.handlers[c_type](local_id, self.api, conn, 
+                            res = self.handlers[c_type](local_id, self.api, self.make_conn, 
                                                         get_gms_id = partial(self._get_gm_id, item_type='song'),
                                                         get_gmp_id = partial(self._get_gm_id, item_type='playlist'))
                             #When the handler created a remote object, update our local mappings.
