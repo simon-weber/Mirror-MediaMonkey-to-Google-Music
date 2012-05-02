@@ -36,6 +36,7 @@ id_db_fn = 'gmids.db'
 #Defines the tables in the id mapping database. Keys are HandlerResult.item_types.
 item_to_table = {'song': 'GMSongIds', 'playlist': 'GMPlaylistIds'}
 
+
 ### Various data structures used to define a config for a media player db.
 
 #The configuration for a media player: the action pairs and how to connect.
@@ -53,10 +54,18 @@ TriggerDef = collections.namedtuple('TriggerDef', ['name', 'table', 'when', 'id_
 # gm_id: <string>
 HandlerResult = collections.namedtuple('HandlerResult', ['action', 'item_type', 'gm_id'])
 
+class GMSyncError(Exception):
+    """Base class for any error originating from the service."""
+    pass
+
+class UnmappedId(UnmappedId):
+    """Raised when we expect that a mapping exists between local/remote ids,
+    but one does not."""
+    pass
+
 
 #A mediaplayer config defines handlers.
-#conn uses sqlite3.Row as row_factory.
-#They are expected to do whatever is needed to push out changes.
+#These provide code for pushing out changes.
 
 #They do not need to check for success, but can raise CallFailure,
 # sqlite.Error or UnmappedId, which the service will handle.
@@ -69,7 +78,7 @@ class Handler:
 
     A mediaplayer config defines one for each kind of local change (eg the addition of a song)."""
 
-    def __init__(self, local_id, api, mp_conn, gmid_conn):
+    def __init__(self, local_id, api, mp_conn, gmid_conn, get_gm_id):
         """Create an instance of a Handler. This is done by the service when a specific change is detected."""
  
         self.local_id = local_id
@@ -80,14 +89,15 @@ class Handler:
 
         #A cursor for the id database - this shouldn't be needed in mediaplayer configs, they use gm{s,p}id.
         self.id_cur = gmid_conn.cursor()
+        self._get_gm_id = get_gm_id #a func that takes localid, item_type, cursor and returns the matching GM id, or raises UnmappedId
 
     @property
     def gms_id(self):
-        return get_gm_id(self.local_id, 'song', self.id_cur)
+        return self._get_gm_id(self.local_id, 'song', self.id_cur)
 
     @property
     def gmp_id(self):
-        return get_gm_id(self.local_id, 'playlist', self.id_cur)
+        return self._get_gm_id(self.local_id, 'playlist', self.id_cur)
 
     def push_changes(self):
         """Send changes to Google Music. This is implemented in mediaplayer configurations.
@@ -100,37 +110,9 @@ class Handler:
         raise NotImplementedError
 
 
-#This should be in the outside factory.
-def _get_gm_id(self, localId, item_type, cur):
-    cur.execute("SELECT gmId FROM %s WHERE localId=?" % item_to_table[item_type], (localId,))
-    gm_id = cur.fetchone()
-
-
-    if not gm_id: raise UnmappedId
-
-    return gm_id[0]                        
-
-def handler(f):
-    """A wrapper to perform handler boilerplate actions.
-    Expects the handler to be called with kwargs make_conn, make_gmid_conn, get_gms_id, get_gmp_id,
-    and will call the handler with with args + a cursor and the get_id methods ready to be called."""
-    
-    @functools.wraps(f)
-    def wrapper(*args, **kwargs):
-        #Set up our db connection for this handler instance.
-        make_conn, make_gmid_conn, get_gms_id, get_gmp_id = [kwargs[k] for k in ('make_conn', 'make_gmid_conn', 'get_gms_id', 'get_gmp_id')]
-        with closing(make_conn()) as conn, closing(make_gmid_conn()) as gmid_conn:
-            cur = conn.cursor()
-            id_cur = gmid_conn.cursor()
-
-            get_gms_id = functools.partial(get_gms_id, cur=id_cur)
-            get_gmp_id = functools.partial(get_gmp_id, cur=id_cur)
-
-            return f(*(args+(cur, get_gms_id, get_gmp_id)))
-
-    return wrapper
 
 ### Utility functions involved in attaching/detaching from the local db.
+
 def create_trigger(change_type, triggerdef, conn):
     keys = triggerdef._asdict()
     keys['change_type'] = change_type
@@ -205,6 +187,47 @@ def reattach(conn, action_pairs):
 
 ### Utilities for writing/reading configuration.
 
+@contextlib.contextmanager
+def backed_up(filename):
+    """Context manager to back up a file and remove the backup.
+
+    *filename*.bak will be overwritten in the process, if it exists.
+    """
+
+    exists = os.path.isfile(filename)
+    bak_name = filename+'.bak'
+
+    if exists: os.rename(filename, bak_name)
+    try:
+        yield
+        #if we terminate unexpectedly (eg a reboot), 
+        # the backup will remain
+    finally:
+        if exists: os.remove(bak_name)
+
+def atomic_write(filename, text):
+    """Return True if *filename* is overwritten with *text* successfully. The write will be atomic.
+
+    *filename*.tmp may be overwritten.
+    """
+
+    tmp_name = filename+'.tmp'
+
+    try:
+        with open(tmp_name, 'w') as tmp:
+            tmp.write(str(text))
+
+        #this _should_ be atomic cross-platform
+        with backed_up(filename):
+            os.rename(tmp_name, filename)            
+
+    except Exception as e:
+        #TODO warn that bak may be able to be restored.
+        return False
+
+
+    return True
+
 def get_conf_dir(confname):
     """Return the directory for this *confname*, with a trailing separator."""
     conf_dir = appdirs.user_data_dir(appname='sync2gm', appauthor='Simon Weber', version=confname)
@@ -278,56 +301,8 @@ class MockApi(Api):
         #just log the request
         self.log.warning("wc_call %s %s", service_name, args)
 
-class GMSyncError(Exception):
-    pass
-
-class UnmappedId(Exception):
-    """Raised when we expect a mapping exists between local/remote ids,
-    but one does not."""
-    pass
 
 
-@contextlib.contextmanager
-def backed_up(filename):
-    """Context manager to back up a file and remove the backup.
-
-    *filename*.bak will be overwritten if it exists.
-    """
-
-    exists = os.path.isfile(filename)
-    bak_name = filename+'.bak'
-
-    if exists: os.rename(filename, bak_name)
-    try:
-        yield
-        #if we terminate unexpectedly (eg a reboot), 
-        # the backup will remain
-    finally:
-        if exists: os.remove(bak_name)
-
-def atomic_write(filename, text):
-    """Return True if *filename* is overwritten with *text* successfully. The write will be atomic.
-
-    *filename*.tmp may be overwritten.
-    """
-
-    tmp_name = filename+'.tmp'
-
-    try:
-        with open(tmp_name, 'w') as tmp:
-            tmp.write(str(text))
-
-        #this _should_ be atomic cross-platform
-        with backed_up(filename):
-            os.rename(tmp_name, filename)            
-
-    except Exception as e:
-        #TODO warn that bak may be able to be restored.
-        raise #debug
-        return False
-
-
-    return True
 
 class MockApi(Api):
 
@@ -346,46 +321,44 @@ class MockApi(Api):
         return {'id': 'test'} #super hack
 
 class ChangePollThread(threading.Thread):
-    def __init__(self, make_conn, handlers, db_file, lib_name): #probably want something like "init" here to drop/create fresh map tables
+    """This thread does the work of polling for changes and pushing them out."""
+    
+    def __init__(self, make_conn, api, mp_db_fn, conf_dir, handlers):
+        """makeconn - one param func to connect to a db, given a fn
+        api - an already authenticated api
+        mp_db_fn - filename of the mediaplayer db
+        conf_dir - the config dir, with a trailing separator
+        handlers - a list of Handlers, ordered by change type
+        """
+        
         #Most of this should eventually be pulled into protocol.
         threading.Thread.__init__(self)
         self._running = threading.Event()
-        self._db = db_file
+        self._db = mp_db_fn
         self.make_conn = partial(make_conn, self._db)
-        self._config_dir = appdirs.user_data_dir(appname='mm2gm', appauthor='Simon Weber', version=lib_name)
-        #Ensure the setting dir exists.
-        if not os.path.isdir(self._config_dir):
-            os.makedirs(self._config_dir)
-        
-        self._change_file = self._config_dir + os.sep + 'last_change'
+        self._config_dir = conf_dir
+        self._change_file = self._config_dir + change_fn 
 
 
-        id_db_loc = self._config_dir + os.sep + 'gmids.db'
+        id_db_loc = self._config_dir + id_db_fn
         self.make_gmid_conn = partial(sqlite3.connect, id_db_loc)
-
-        #Ensure the id mapping tables exist.
-        #keep in mind the init note above
-        with closing(self.make_gmid_conn()) as conn:
-            for table in item_to_table.values():
-                conn.execute(
-                    """CREATE TABLE IF NOT EXISTS {tablename}(
-localId INTEGER PRIMARY KEY,
-gmId TEXT NOT NULL
-)""".format(tablename=table))
-
-        
-        #Ensure the change file had something in it.
-        if not os.path.isfile(self._change_file):
-            with open(self._change_file, mode='w') as f:
-                f.write("0")
-            
 
         self.handlers = handlers
         self.activate() #we won't run until start()ed
 
         #cheat for debugging
-        self.api = MockApi()
+        self.api = api
         
+    def _get_gm_id(self, localId, item_type, cur):
+        """Return the GM id for this *localId* and *item_type*, using sqlite cursor *cur*."""
+
+        cur.execute("SELECT gmId FROM %s WHERE localId=?" % item_to_table[item_type], (localId,))
+        gm_id = cur.fetchone()
+
+        if not gm_id: raise UnmappedId
+
+        return gm_id[0]                        
+
 
     def activate(self):
         self._running.set()
@@ -396,15 +369,6 @@ gmId TEXT NOT NULL
     @property
     def active(self):
         return self._running.isSet()
-
-    def _get_gm_id(self, localId, item_type, cur):
-        cur.execute("SELECT gmId FROM %s WHERE localId=?" % item_to_table[item_type], (localId,))
-        gm_id = cur.fetchone()
-
-
-        if not gm_id: raise UnmappedId
-
-        return gm_id[0]
 
     def update_id_mapping(self, local_id, handler_res):
         """Update the local to remote id mapping database with a HandlerResult (*handler_res*)."""
@@ -469,10 +433,9 @@ gmId TEXT NOT NULL
                         print c_id, c_type, local_id
                         
                         try:
-                            res = self.handlers[c_type](local_id, self.api, make_conn=self.make_conn, 
-                                                        make_gmid_conn=self.make_gmid_conn,
-                                                        get_gms_id = partial(self._get_gm_id, item_type='song'),
-                                                        get_gmp_id = partial(self._get_gm_id, item_type='playlist'))
+                            handler = self.handlers[c_type](local_id, self.api, conn, make_gmid_conn(), self._get_gm_id)
+                            res = handler.push_changes()
+
                             #When the handler created a remote object, update our local mappings.
                             if res is not None: self.update_id_mapping(local_id, res)
 
@@ -483,7 +446,7 @@ gmId TEXT NOT NULL
                             print "exception while pushing change"
                             print e.message
                             print traceback.format_exc()
-                        finally: #mark this change as pushed out
+                        finally: #mark this change as handled, correctly or not
                             if not atomic_write(self._change_file, c_id): 
                                 print "failed to write out change!"
 
