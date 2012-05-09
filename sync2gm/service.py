@@ -3,6 +3,7 @@
 """A server that syncs a local database to Google Music."""
 
 import socket
+import logging
 from collections import namedtuple
 import threading
 import time
@@ -28,7 +29,7 @@ config_fn = 'config'
 #
 change_fn = 'last_change'
 id_db_fn = 'gmids.db'
-
+log_fn = 'log'
 
 #Defines the tables in the id mapping database. Keys are HandlerResult.item_types.
 item_to_table = {'song': 'GMSongIds', 'playlist': 'GMPlaylistIds'}
@@ -351,6 +352,30 @@ class ChangePollThread(threading.Thread):
 
         #cheat for debugging
         self.api = api
+
+        #Setup logging for the thread.
+        logger = logging.getLogger('sync2gm')
+        logger.setLevel(logging.DEBUG)
+
+        # create file handler to log debug info
+        fh = logging.FileHandler(conf_dir + log_fn)
+        fh.setLevel(logging.DEBUG)
+
+        # create console handler with a higher log level
+        ch = logging.StreamHandler()
+        ch.setLevel(logging.WARNING)
+
+        # create formatter and add it to the handlers
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        fh.setFormatter(formatter)
+        ch.setFormatter(formatter)
+
+        logger.addHandler(fh)
+        logger.addHandler(ch)
+
+        logger.info("!-- Starting sync2gm log --!")
+        self.log = logger
+
         
     def _get_gm_id(self, localId, item_type, cur):
         """Return the GM id for this *localId* and *item_type*, using sqlite cursor *cur*."""
@@ -405,7 +430,7 @@ class ChangePollThread(threading.Thread):
                with open(self._change_file) as f:
                    last_change_id = int(f.readline().strip())
                    
-            print "polling. last change:", last_change_id
+            self.log.info("polling. last change:", last_change_id)
 
             #Buffer in changes to memory.
             #The limit is intended to limit risk of losing changes.
@@ -421,7 +446,7 @@ class ChangePollThread(threading.Thread):
                         break
                     except sqlite3.Error as e:
                         if "database is locked" in e.message:
-                            print "locked - retrying"
+                            self.log.info("locked - retrying")
                         else: raise
                     
                 changes = cur.fetchmany(max_changes)
@@ -433,7 +458,7 @@ class ChangePollThread(threading.Thread):
 
                     for change in changes:
                         c_id, c_type, local_id = change
-                        print c_id, c_type, local_id
+                        self.log.info("handling change id %s", c_id)
                         
                         try:
                             handler = self.handlers[c_type](local_id, self.api, conn, make_gmid_conn(), self._get_gm_id)
@@ -443,15 +468,13 @@ class ChangePollThread(threading.Thread):
                             if res is not None: self.update_id_mapping(local_id, res)
 
                         except CallFailure as cf:
-                            print "call failure!" #log failure to update; this is a big deal
+                            self.log.error('call failure from api - could not push this change')
                         except Exception as e:
                             #for debugging
-                            print "exception while pushing change"
-                            print e.message
-                            print traceback.format_exc()
+                            self.log.exception("exception while pushing change")
                         finally: #mark this change as handled, correctly or not
-                            if not atomic_write(self._change_file, c_id): 
-                                print "failed to write out change!"
+                            if not atomic_write(self._change_file, c_id):
+                                self.log.error("failed to write id %s to change file", c_id) 
 
                             
 
@@ -530,9 +553,9 @@ def start_service(confname, port, gm_email, gm_password):
     
 
     try:
-        server = ThreadedTCPServer(('localhost', port), ServiceHandler)
+        server = SocketServer.TCPServer(('localhost', port), ServiceHandler)
         server_thread = threading.Thread(target=server.serve_forever)
-        poll_thread = ChangePollThread(mp_conf.make_conn, api, conf['mp_db_fn'], get_conf_dir(confname), mp_conf.handlers)
+        poll_thread = ChangePollThread(mp_conf.make_connection, api, conf['mp_db_fn'], get_conf_dir(confname), mp_conf.action_pairs)
         server_thread.start()
         poll_thread.start()
     except Exception as e:

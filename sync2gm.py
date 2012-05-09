@@ -12,7 +12,10 @@ def setup(args):
     print "attached."
 
 def run(args):
-    service.start_service(args.confname, args.port, args.email, args.password)
+    ret = service.start_service(args.confname, args.port, args.email, args.password)
+    if ret is not True:
+        print ret
+
 
 def stop(args): 
     service.stop_service(args.port)
