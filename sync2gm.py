@@ -12,9 +12,13 @@ def setup(args):
     print "attached."
 
 def run(args):
-
     service.start_service(args.confname, args.port, args.email, args.password)
 
+def stop(args): 
+    service.stop_service(args.port)
+
+def status(args):
+    print service.is_service_running(args.port)
 
 def main():
     parser = argparse.ArgumentParser(description="Sync a local mediaplayer to Google Music.")
@@ -36,6 +40,18 @@ def main():
     parser_act.add_argument('password', help="Account password.")
     parser_act.add_argument('--port', default=9000, type=int, help='The port to run on. (default: %(default)s)')
     parser_act.set_defaults(func=run)
+
+    parser_stop = subparsers.add_parser('stop', help='Stop a currently running service.')
+
+    parser_stop.add_argument('--port', default=9000, type=int, help='The port the service is running on (default: %(default)s)')
+    parser_stop.set_defaults(func=stop)
+
+    parser_status = subparsers.add_parser('status', help='Display "True" if the service is running.')
+
+    parser_status.add_argument('--port', default=9000, type=int, help='The port the service is running on (default: %(default)s)')
+    parser_status.set_defaults(func=status)
+
+
 
     args = parser.parse_args()
     args.func(args)

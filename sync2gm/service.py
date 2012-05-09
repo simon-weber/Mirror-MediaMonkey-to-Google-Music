@@ -2,6 +2,7 @@
 
 """A server that syncs a local database to Google Music."""
 
+import socket
 from collections import namedtuple
 import threading
 import time
@@ -483,6 +484,39 @@ class ServiceHandler(SocketServer.StreamRequestHandler):
         elif self.data == 'status':
             self.wfile.write('running')
 
+def send_service(port, s, receive=False):
+    """Send a string *s* to the service running on port *port*.
+    
+    When *receieve* is True, return the service's response."""
+
+  # Create a socket (SOCK_STREAM means a TCP socket)
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+    try:
+        # Connect to server and send data
+        sock.connect(('localhost', port))
+        sock.sendall(s + "\n")
+
+        if recieve:
+            # Receive data from the server and shut down
+            received = sock.recv(1024)
+    finally:
+            sock.close()
+
+    if receieve: return received
+   
+
+def is_service_running(port):
+    try:
+        if send_service(port, 'status', receive=True): return True
+        else: return False
+    except:
+        return False
+
+def stop_service(port):
+    """Send a signal to stop the service on port *port*."""
+    if is_service_running(port): send_service(port, 'shutdown')
+
 def start_service(confname, port, gm_email, gm_password):
     """Attempt to start the service on locally on port *port*, using config *confname*.
 
@@ -491,7 +525,7 @@ def start_service(confname, port, gm_email, gm_password):
     #Read in the config.
     conf = read_config_file(confname)
     mp_conf = mp_confs[conf['mp_type']]
-    api = gmusicapi.api.Api()
+    api = Api()
     api.login(gm_email, gm_password) #need to use init here
     
 
