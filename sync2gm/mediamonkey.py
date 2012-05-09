@@ -4,7 +4,7 @@ import sqlite3
 from contextlib import closing
 from collections import namedtuple
 
-from sync2gm import MPConf, ActionPair, TriggerDef, HandlerResult, GMSyncError
+from service import MPConf, ActionPair, TriggerDef, HandlerResult, GMSyncError, Handler
 
 from gmusicapi import CallFailure
 
@@ -19,7 +19,7 @@ from gmusicapi import CallFailure
 
 #Maps a local column to a piece of gm metadata.
 # to_gm_form is a function to translate from local -> gm form.
-MDMapping = collections.namedtuple('MDMapping', ['col', 'gm_key', 'to_gm_form'])
+MDMapping = namedtuple('MDMapping', ['col', 'gm_key', 'to_gm_form'])
 
 def make_md_map(col, gm_key=None, to_gm_form=None):
     """Easily create a new MDMapping."""

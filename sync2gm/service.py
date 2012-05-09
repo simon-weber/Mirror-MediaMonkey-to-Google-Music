@@ -2,7 +2,7 @@
 
 """A server that syncs a local database to Google Music."""
 
-import collections
+from collections import namedtuple
 import threading
 import time
 import contextlib
@@ -13,14 +13,10 @@ import sqlite3
 import json
 import SocketServer
 
-from mediamonkey import config as mm_config
 
 from gmusicapi import *
 import appdirs
 
-
-### Map mediaplayer type to config
-mp_confs = {'mediamonkey': mm_config}
 
 
 ### The filenames making up a complete configuration.
@@ -43,22 +39,22 @@ item_to_table = {'song': 'GMSongIds', 'playlist': 'GMPlaylistIds'}
 MPConf = namedtuple('MPConf', ['action_pairs', 'make_connection'])
 
 #A trigger/handler pair. A list of these defines how to respond to db changes.
-ActionPair = collections.namedtuple('ActionPair', ['trigger', 'handler'])
+ActionPair = namedtuple('ActionPair', ['trigger', 'handler'])
 
 #A definition of a trigger.
-TriggerDef = collections.namedtuple('TriggerDef', ['name', 'table', 'when', 'id_text'])
+TriggerDef = namedtuple('TriggerDef', ['name', 'table', 'when', 'id_text'])
 
 #Holds the result from a handler, so the service can keep local -> remote mapping up to date.
 # action: one of {'create', 'delete'}. Updates can just return an empty HandlerResult.
 # itemType: one of {'song', 'playlist'}
 # gm_id: <string>
-HandlerResult = collections.namedtuple('HandlerResult', ['action', 'item_type', 'gm_id'])
+HandlerResult = namedtuple('HandlerResult', ['action', 'item_type', 'gm_id'])
 
 class GMSyncError(Exception):
     """Base class for any error originating from the service."""
     pass
 
-class UnmappedId(UnmappedId):
+class UnmappedId(GMSyncError):
     """Raised when we expect that a mapping exists between local/remote ids,
     but one does not."""
     pass
@@ -109,6 +105,12 @@ class Handler:
 
         raise NotImplementedError
 
+
+#Dirty. There's an import loop with the mp config that needs the above structures.
+#They should probably be moved elsewhere instead of doing this.
+from mediamonkey import config as mm_config
+### Map mediaplayer type to config
+mp_confs = {'mediamonkey': mm_config}
 
 
 ### Utility functions involved in attaching/detaching from the local db.
@@ -249,7 +251,7 @@ def read_config_file(confname):
         return json.load(f)
 
 
-def init_config(confname, mp_db_fn, mp_type):
+def init_config(confname, mp_type, mp_db_fn):
     """Attach to the local database, and create or overwrite the configuration for the given *confname*.
     """
 
@@ -262,7 +264,7 @@ def init_config(confname, mp_db_fn, mp_type):
 
     #(re)create the config file.
     conf_dict = {'mp_type': mp_type, 'mp_db_fn': mp_db_fn}
-    write_conf_file(conf_fn, conf_dict)
+    write_conf_file(confname, conf_dict)
 
     #(re)create the change file.
     if not os.path.isfile(conf_dir + change_fn):
@@ -282,9 +284,9 @@ def init_config(confname, mp_db_fn, mp_type):
                 
 
     #(re)attach to the db.
-    make_connection, action_pairs = mp_confs[mp_type]
+    action_pairs, make_connection = mp_confs[mp_type]
 
-    with closing(make_connection(conf_dir + mp_db_fn)) as conn:
+    with closing(make_connection(mp_db_fn)) as conn:
         reattach(conn, action_pairs)
     
 
@@ -488,13 +490,17 @@ def start_service(confname, port, gm_email, gm_password):
 
     #Read in the config.
     conf = read_config_file(confname)
+    mp_conf = mp_confs[conf['mp_type']]
+    api = gmusicapi.api.Api()
+    api.login(gm_email, gm_password) #need to use init here
+    
 
     try:
         server = ThreadedTCPServer(('localhost', port), ServiceHandler)
         server_thread = threading.Thread(target=server.serve_forever)
-        poll_thread = ChangePollThread
-
+        poll_thread = ChangePollThread(mp_conf.make_conn, api, conf['mp_db_fn'], get_conf_dir(confname), mp_conf.handlers)
         server_thread.start()
+        poll_thread.start()
     except Exception as e:
         return "Could not start service:", repr(e)
 

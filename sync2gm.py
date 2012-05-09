@@ -4,18 +4,16 @@ import os
 
 import sqlite3
 
-import sync2gm
+from sync2gm import service
 
 def setup(args):
 
-    sync2gm.init_config(args.confname, args.mp_type, args.mp_db_path)
-    
-
-
+    service.init_config(args.confname, args.mp_type, args.mp_db_path)
+    print "attached."
 
 def run(args):
-    print "running run!"
-    print args
+
+    service.start_service(args.confname, args.port, args.email, args.password)
 
 
 def main():
@@ -32,22 +30,16 @@ def main():
 
 
     parser_act = subparsers.add_parser('run', help='Run a service for some configuration.')
+    
     parser_act.add_argument('confname', help=confname_help)
+    parser_act.add_argument('email', help="Gmail address to authenticate with.")
+    parser_act.add_argument('password', help="Account password.")
     parser_act.add_argument('--port', default=9000, type=int, help='The port to run on. (default: %(default)s)')
     parser_act.set_defaults(func=run)
 
     args = parser.parse_args()
     args.func(args)
 
-
-"""
-        self._config_dir = 
-        
-        self._change_file = self._config_dir + os.sep + 'last_change'
-
-
-        id_db_loc = self._config_dir + os.sep + 'gmids.db'
-"""
 
 if __name__ == '__main__':
     main()
