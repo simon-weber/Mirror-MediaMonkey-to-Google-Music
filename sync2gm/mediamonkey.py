@@ -4,7 +4,8 @@ import sqlite3
 from contextlib import closing
 from collections import namedtuple
 
-from service import MPConf, ActionPair, TriggerDef, HandlerResult, GMSyncError, Handler
+from service import GMSyncError
+from mpconf import MPConf, ActionPair, TriggerDef, HandlerResult, Handler
 
 from gmusicapi import CallFailure
 

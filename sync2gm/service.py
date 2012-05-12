@@ -15,6 +15,10 @@ import sqlite3
 import json
 import SocketServer
 
+from mpconf import *
+from mediamonkey import config as mm_config
+### Map mediaplayer type to config
+mp_confs = {'mediamonkey': mm_config}
 
 from gmusicapi import *
 import appdirs
@@ -23,7 +27,7 @@ import appdirs
 
 ### The filenames making up a complete configuration.
 config_fn = 'config'
-#stores a dict encoding. keys:
+#stores a dict encoding. keys: TODO: formalize the config
 #     db_path: the path of the mediaplayer database
 #     mp_type: the mediaplayer type
 #
@@ -31,88 +35,14 @@ change_fn = 'last_change'
 id_db_fn = 'gmids.db'
 log_fn = 'log'
 
+
 #Defines the tables in the id mapping database. Keys are HandlerResult.item_types.
 item_to_table = {'song': 'GMSongIds', 'playlist': 'GMPlaylistIds'}
-
-
-### Various data structures used to define a config for a media player db.
-
-#The configuration for a media player: the action pairs and how to connect.
-MPConf = namedtuple('MPConf', ['action_pairs', 'make_connection'])
-
-#A trigger/handler pair. A list of these defines how to respond to db changes.
-ActionPair = namedtuple('ActionPair', ['trigger', 'handler'])
-
-#A definition of a trigger.
-TriggerDef = namedtuple('TriggerDef', ['name', 'table', 'when', 'id_text'])
-
-#Holds the result from a handler, so the service can keep local -> remote mapping up to date.
-# action: one of {'create', 'delete'}. Updates can just return an empty HandlerResult.
-# itemType: one of {'song', 'playlist'}
-# gm_id: <string>
-HandlerResult = namedtuple('HandlerResult', ['action', 'item_type', 'gm_id'])
-
-class GMSyncError(Exception):
-    """Base class for any error originating from the service."""
-    pass
 
 class UnmappedId(GMSyncError):
     """Raised when we expect that a mapping exists between local/remote ids,
     but one does not."""
     pass
-
-
-#A mediaplayer config defines handlers.
-#These provide code for pushing out changes.
-
-#They do not need to check for success, but can raise CallFailure,
-# sqlite.Error or UnmappedId, which the service will handle.
-
-#All handlers that create/delete remote items must return a HandlerResult.
-#This allows the service to keep track of local -> remote mappings.
-
-class Handler:
-    """A Handler can push out local changes to Google Music.
-
-    A mediaplayer config defines one for each kind of local change (eg the addition of a song)."""
-
-    def __init__(self, local_id, api, mp_conn, gmid_conn, get_gm_id):
-        """Create an instance of a Handler. This is done by the service when a specific change is detected."""
- 
-        self.local_id = local_id
-        self.api = api
-
-        #A cursor for the mediaplayer database.
-        self.mp_cur = mp_conn.cursor()
-
-        #A cursor for the id database - this shouldn't be needed in mediaplayer configs, they use gm{s,p}id.
-        self.id_cur = gmid_conn.cursor()
-        self._get_gm_id = get_gm_id #a func that takes localid, item_type, cursor and returns the matching GM id, or raises UnmappedId
-
-    @property
-    def gms_id(self):
-        return self._get_gm_id(self.local_id, 'song', self.id_cur)
-
-    @property
-    def gmp_id(self):
-        return self._get_gm_id(self.local_id, 'playlist', self.id_cur)
-
-    def push_changes(self):
-        """Send changes to Google Music. This is implemented in mediaplayer configurations.
-
-        This function does not need to handle failure. The service will handle gmusicapi.CallFailure, 
-        sqlite3.Error, or sync2gm.UnmappedId.
-
-        api (already authenticated), mp_cur, gms_id, and gmp_id are provided for convinience."""
-
-        raise NotImplementedError
-
-
-#Dirty. There's an import loop with the mp config that needs the above structures.
-#They should probably be moved elsewhere instead of doing this.
-from mediamonkey import config as mm_config
-### Map mediaplayer type to config
-mp_confs = {'mediamonkey': mm_config}
 
 
 ### Utility functions involved in attaching/detaching from the local db.
