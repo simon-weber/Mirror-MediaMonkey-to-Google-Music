@@ -327,12 +327,12 @@ class MockApi(Api):
 class ChangePollThread(threading.Thread):
     """This thread does the work of polling for changes and pushing them out."""
     
-    def __init__(self, make_conn, api, mp_db_fn, conf_dir, handlers):
+    def __init__(self, make_conn, api, mp_db_fn, conf_dir, action_pairs):
         """makeconn - one param func to connect to a db, given a fn
         api - an already authenticated api
         mp_db_fn - filename of the mediaplayer db
         conf_dir - the config dir, with a trailing separator
-        handlers - a list of Handlers, ordered by change type
+        action_pairs - a list of action_pairs, ordered by change type
         """
         
         #Most of this should eventually be pulled into protocol.
@@ -347,7 +347,7 @@ class ChangePollThread(threading.Thread):
         id_db_loc = self._config_dir + id_db_fn
         self.make_gmid_conn = partial(sqlite3.connect, id_db_loc)
 
-        self.handlers = handlers
+        self.action_pairs = action_pairs
         self.activate() #we won't run until start()ed
 
         #cheat for debugging
@@ -430,7 +430,7 @@ class ChangePollThread(threading.Thread):
                with open(self._change_file) as f:
                    last_change_id = int(f.readline().strip())
                    
-            self.log.info("polling. last change:", last_change_id)
+            self.log.info("polling. last change: %s", last_change_id)
 
             #Buffer in changes to memory.
             #The limit is intended to limit risk of losing changes.
@@ -461,7 +461,9 @@ class ChangePollThread(threading.Thread):
                         self.log.info("handling change id %s", c_id)
                         
                         try:
-                            handler = self.handlers[c_type](local_id, self.api, conn, make_gmid_conn(), self._get_gm_id)
+                            #Create a Handler per the mp_conf specs, then use it to push our changes.
+                            pair = self.action_pairs[c_type]
+                            handler = pair.handler(local_id, self.api, conn, self.make_gmid_conn(), self._get_gm_id)
                             res = handler.push_changes()
 
                             #When the handler created a remote object, update our local mappings.

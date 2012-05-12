@@ -96,7 +96,7 @@ def get_path(local_id, cur):
 
 class cSongHandler(Handler):
     def push_changes(self):
-        path = get_path(local_id, self.mp_cur)
+        path = get_path(self.local_id, self.mp_cur)
 
         new_ids = self.api.upload(path)
 
@@ -108,7 +108,7 @@ class cSongHandler(Handler):
 
 class uSongHandler(Handler):
     def push_changes(self):
-        mm_md = self.mp_cur.execute("SELECT %s FROM Songs WHERE ID=?" % mm_sql_cols, (local_id,)).fetchone()
+        mm_md = self.mp_cur.execute("SELECT %s FROM Songs WHERE ID=?" % mm_sql_cols, (self.local_id,)).fetchone()
 
         gm_song = {}
         for col in mm_md.keys():
@@ -132,7 +132,7 @@ class dSongHandler(Handler):
 class cPlaylistHandler(Handler):
     def push_changes(self):
         #currently assuming that this is called prior to any inserts on PlaylistSongs
-        playlist_data = self.mp_cur.execute("SELECT PlaylistName FROM Playlists WHERE IDPlaylist=?", (local_id,)).fetchone()
+        playlist_data = self.mp_cur.execute("SELECT PlaylistName FROM Playlists WHERE IDPlaylist=?", (self.local_id,)).fetchone()
 
         new_gm_pid = self.api.create_playlist(playlist_data[0])
 
@@ -140,13 +140,13 @@ class cPlaylistHandler(Handler):
 
 class uPlaylistNameHandler(Handler):
     def push_changes(self):
-        playlist_data = self.mp_cur.execute("SELECT PlaylistName FROM Playlists WHERE IDPlaylist=?", (local_id,)).fetchone()
+        playlist_data = self.mp_cur.execute("SELECT PlaylistName FROM Playlists WHERE IDPlaylist=?", (self.local_id,)).fetchone()
 
         self.api.change_playlist_name(self.gmp_id, playlist_data[0])
 
 class dPlaylistHandler(Handler):
     def push_changes(self):
-        playlist_data = self.mp_cur.execute("SELECT PlaylistName FROM Playlists WHERE IDPlaylist=?", (local_id,)).fetchone()
+        playlist_data = self.mp_cur.execute("SELECT PlaylistName FROM Playlists WHERE IDPlaylist=?", (self.local_id,)).fetchone()
 
         gm_pid = self.gmp_id
 
@@ -159,7 +159,7 @@ class changePlaylistHandler(Handler):
         #All playlist updates are handled idempotently.
 
         #Get all the songs now in the playlist.
-        song_rows = self.mp_cur.execute("SELECT IDSong FROM PlaylistSongs WHERE IDPlaylist=? ORDER BY SongOrder", (local_id,)).fetchall()
+        song_rows = self.mp_cur.execute("SELECT IDSong FROM PlaylistSongs WHERE IDPlaylist=? ORDER BY SongOrder", (self.local_id,)).fetchall()
 
         #Build the new playlist.
         pl = []
