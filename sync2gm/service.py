@@ -314,7 +314,8 @@ class ChangePollThread(threading.Thread):
         #capture/log failure?
         try:
             with closing(self.make_gmid_conn()) as conn:
-                conn.execute(command, values)
+                with conn: #use context manager to auto-commit
+                    conn.execute(command, values)
             
         except:
             self.log.exception("Problem when updating id mapping")

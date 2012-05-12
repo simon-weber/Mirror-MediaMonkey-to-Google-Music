@@ -122,7 +122,7 @@ class uSongHandler(Handler):
             mdm = col_to_mdm[col]
 
             gm_key = mdm.gm_key
-            data = mdm.to_gm_form(mm_md)
+            data = mdm.to_gm_form(mm_md[col])
 
             gm_song[gm_key] = data
 
