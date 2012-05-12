@@ -81,7 +81,7 @@ def attach(conn, action_pairs):
     success = False
 
     try:
-        create_service_tables(conn, len(action_pairs))
+        create_service_table(conn, len(action_pairs))
 
         for i in range(len(action_pairs)):
             triggerdef = action_pairs[i].trigger
@@ -101,14 +101,14 @@ def detach(conn, action_pairs):
     success = False
 
     try:
-        drop_service_tables(conn)
+        drop_service_table(conn)
         
         for triggerdef, handler in action_pairs:
             drop_trigger(triggerdef, conn)    
 
         success = True
 
-    except sqlite3.Error:
+    except sqlite3.Error as e:
         success = False
         
     finally:
@@ -185,6 +185,7 @@ def read_config_file(confname):
 
 def init_config(confname, mp_type, mp_db_fn):
     """Attach to the local database, and create or overwrite the configuration for the given *confname*.
+    Return True on success, False on failure.
     """
 
     conf_dir = get_conf_dir(confname)
@@ -199,10 +200,9 @@ def init_config(confname, mp_type, mp_db_fn):
     write_conf_file(confname, conf_dict)
 
     #(re)create the change file.
-    if not os.path.isfile(conf_dir + change_fn):
-        with open(conf_dir + change_fn, mode='w') as f:
-            f.write("0")
-    
+    with open(conf_dir + change_fn, mode='w') as f:
+        f.write("0")
+
     #(re)create the id mapping tables.
     with closing(sqlite3.connect(conf_dir + id_db_fn)) as conn:
         for table in item_to_table.values():
@@ -219,41 +219,8 @@ def init_config(confname, mp_type, mp_db_fn):
     action_pairs, make_connection = mp_confs[mp_type]
 
     with closing(make_connection(mp_db_fn)) as conn:
-        reattach(conn, action_pairs)
+        return reattach(conn, action_pairs)
     
-
-    
-
-class MockApi(Api):
-    def _wc_call(self, service_name, *args, **kw):
-        """Returns the response of a web client call.
-        :param service_name: the name of the call, eg ``search``
-        additional positional arguments are passed to ``build_body``for the retrieved protocol.
-        if a 'query_args' key is present in kw, it is assumed to be a dictionary of additional key/val pairs to append to the query string.
-        """
-
-        #just log the request
-        self.log.warning("wc_call %s %s", service_name, args)
-
-
-
-
-class MockApi(Api):
-
-    def is_authenticated(self):
-        return True
-
-    def _wc_call(self, service_name, *args, **kw):
-        """Returns the response of a web client call.
-        :param service_name: the name of the call, eg ``search``
-        additional positional arguments are passed to ``build_body``for the retrieved protocol.
-        if a 'query_args' key is present in kw, it is assumed to be a dictionary of additional key/val pairs to append to the query string.
-        """
-
-        #just log the request
-        self.log.debug("wc_call %s %s", service_name, args)
-        return {'id': 'test'} #super hack
-
 class ChangePollThread(threading.Thread):
     """This thread does the work of polling for changes and pushing them out."""
     
@@ -280,7 +247,6 @@ class ChangePollThread(threading.Thread):
         self.action_pairs = action_pairs
         self.activate() #we won't run until start()ed
 
-        #cheat for debugging
         self.api = api
 
         #Setup logging for the thread.
@@ -346,13 +312,16 @@ class ChangePollThread(threading.Thread):
 
 
         #capture/log failure?
-        with closing(self.make_gmid_conn()) as conn:
-            conn.execute(command, values)
-        
+        try:
+            with closing(self.make_gmid_conn()) as conn:
+                conn.execute(command, values)
+            
+        except:
+            self.log.exception("Problem when updating id mapping")
 
     def run(self):
 
-        read_new_changeid = True #assumes a changeid exists. currently fulfilled in __init__
+        read_new_changeid = True #assumes a change file exists
 
         while self.active:
 

@@ -7,9 +7,7 @@ import sqlite3
 from sync2gm import service
 
 def setup(args):
-
-    service.init_config(args.confname, args.mp_type, args.mp_db_path)
-    print "attached."
+    print service.init_config(args.confname, args.mp_type, args.mp_db_path)
 
 def run(args):
     ret = service.start_service(args.confname, args.port, args.email, args.password)
