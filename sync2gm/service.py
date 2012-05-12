@@ -393,17 +393,22 @@ class ChangePollThread(threading.Thread):
                         try:
                             #Create a Handler per the mp_conf specs, then use it to push our changes.
                             pair = self.action_pairs[c_type]
-                            handler = pair.handler(local_id, self.api, conn, self.make_gmid_conn(), self._get_gm_id)
+                            handler = pair.handler(local_id, self.api, conn, self.make_gmid_conn(), self._get_gm_id) #TODO: is gmid_conn getting closed?
                             res = handler.push_changes()
 
                             #When the handler created a remote object, update our local mappings.
                             if res is not None: self.update_id_mapping(local_id, res)
 
                         except CallFailure as cf:
-                            self.log.error('call failure from api - could not push this change')
+                            self.log.error('call failure from api - change may not be pushed')
+                        except UnmappedId:
+                            self.log.error('unmapped id - could not push this change')
+                        except LocalOutdated:
+                            self.log.info('local outdated - change skipped. this should be safe')
                         except Exception as e:
                             #for debugging
                             self.log.exception("exception while pushing change")
+
                         finally: #mark this change as handled, correctly or not
                             if not atomic_write(self._change_file, c_id):
                                 self.log.error("failed to write id %s to change file", c_id) 

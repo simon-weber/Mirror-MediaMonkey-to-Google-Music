@@ -4,8 +4,7 @@ import sqlite3
 from contextlib import closing
 from collections import namedtuple
 
-from service import GMSyncError
-from mpconf import MPConf, ActionPair, TriggerDef, HandlerResult, Handler
+from mpconf import MPConf, ActionPair, TriggerDef, HandlerResult, Handler, GMSyncError, LocalOutdated
 
 from gmusicapi import CallFailure
 
@@ -73,13 +72,16 @@ for mdm in md_mappings:
 mm_sql_cols = repr(tuple(col_to_mdm.keys())).replace("'","")[1:-1]
 
 
-#TODO - better error interface, maybe just a generic one and use messages?
-#it's probably just going to be for logging anyway
-
 def get_path(local_id, cur):
     """Return the full file path of this item, or raise GMSyncError. Only works for local items (eg not with media servers)."""
 
-    path, f_id = cur.execute("SELECT SongPath, IDFolder from Songs WHERE ID=?", (local_id,)).fetchone()
+    path_data = cur.execute("SELECT SongPath, IDFolder from Songs WHERE ID=?", (local_id,)).fetchone()
+
+    if path_data is None:
+        raise LocalOutdated
+
+    path, f_id = path_data
+
     #MM separates the path and media, so we need to get the drive letter separately.
     (d_letter,) = cur.execute("SELECT DriveLetter FROM Medias WHERE IDMedia=(SELECT IDMedia FROM Folders WHERE ID=?)", (f_id,)).fetchone()
     if path is not None and d_letter is not None:
@@ -101,8 +103,9 @@ class cSongHandler(Handler):
 
         new_ids = self.api.upload(path)
 
-        if res.get(path) is None:
-            raise CallFailure
+        #Assume that we start from an empty library.
+        if new_ids.get(path) is None:
+            raise CallFailure #CallFailure not raised by upload, since partial success can happen.
 
         return HandlerResult(action='create', item_type='song', gm_id=new_ids[path])
 
@@ -110,6 +113,9 @@ class cSongHandler(Handler):
 class uSongHandler(Handler):
     def push_changes(self):
         mm_md = self.mp_cur.execute("SELECT %s FROM Songs WHERE ID=?" % mm_sql_cols, (self.local_id,)).fetchone()
+        
+        if mm_md is None:
+            raise LocalOutdated
 
         gm_song = {}
         for col in mm_md.keys():
@@ -134,6 +140,9 @@ class cPlaylistHandler(Handler):
     def push_changes(self):
         #currently assuming that this is called prior to any inserts on PlaylistSongs
         playlist_data = self.mp_cur.execute("SELECT PlaylistName FROM Playlists WHERE IDPlaylist=?", (self.local_id,)).fetchone()
+        
+        if playlist_data is None:
+            raise LocalOutdated
 
         new_gm_pid = self.api.create_playlist(playlist_data[0])
 
@@ -143,11 +152,17 @@ class uPlaylistNameHandler(Handler):
     def push_changes(self):
         playlist_data = self.mp_cur.execute("SELECT PlaylistName FROM Playlists WHERE IDPlaylist=?", (self.local_id,)).fetchone()
 
+        if playlist_data is None:
+            raise LocalOutdated
+
         self.api.change_playlist_name(self.gmp_id, playlist_data[0])
 
 class dPlaylistHandler(Handler):
     def push_changes(self):
         playlist_data = self.mp_cur.execute("SELECT PlaylistName FROM Playlists WHERE IDPlaylist=?", (self.local_id,)).fetchone()
+        
+        if playlist_data is None:
+            raise LocalOutdated
 
         gm_pid = self.gmp_id
 
@@ -158,9 +173,14 @@ class dPlaylistHandler(Handler):
 class changePlaylistHandler(Handler):
     def push_changes(self):
         #All playlist updates are handled idempotently.
+        
+        #Ensure the playlist exists.
+        if self.mp_cur.execute("SELECT IDPlaylist FROM Playlists WHERE IDPlaylist=?", (self.local_id,)).fetchone() is None:
+            raise LocalOutdated
 
         #Get all the songs now in the playlist.
         song_rows = self.mp_cur.execute("SELECT IDSong FROM PlaylistSongs WHERE IDPlaylist=? ORDER BY SongOrder", (self.local_id,)).fetchall()
+
 
         #Build the new playlist.
         pl = []

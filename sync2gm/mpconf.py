@@ -5,6 +5,12 @@ class GMSyncError(Exception):
     """Base class for any error originating during syncing."""
     pass
 
+class LocalOutdated(Exception):
+    """Raised when a handler expects to find local information, but does not.
+
+    This usually signals that the service is attempting to update a remote object
+    that no longer exists."""
+
 #The configuration for a media player: the action pairs and how to connect.
 MPConf = namedtuple('MPConf', ['action_pairs', 'make_connection'])
 
