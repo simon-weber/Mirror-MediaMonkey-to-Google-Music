@@ -33,13 +33,22 @@ def make_md_map(col, gm_key=None, to_gm_form=None):
 
 
 def to_gm_rating(r):
-    """Return the GM format for a GM rating, *r*."""
+    """Return the GM format for a MM rating, *r*."""
+    #TODO GM can now support 5 star ratings
     if r == -1:
         return 0
     if 0 <= r < 50:
         return 1
     else:
         return 5
+
+def to_gm_year(y):
+    """Return the GM format for a MM year, *y*."""
+    if y == -1:
+        return 0 #GM uses 0 for 'no year'
+    else: 
+        return int(str(y)[0:4]) #MM stores a yyyymmdd date, GM just wants year.
+
 
 md_mappings = [
     #make_md_map defaults gm_key to col with a lowercase first char,
@@ -50,7 +59,7 @@ md_mappings = [
     make_md_map('Comment'),
     make_md_map('Genre'),
     make_md_map('Rating', to_gm_form = to_gm_rating),
-    make_md_map('Year'),
+    make_md_map('Year', to_gm_form = to_gm_year),
 
     make_md_map('DiscNumber', 'disc'),
     make_md_map('TrackNumber', 'track'),
