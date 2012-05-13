@@ -168,16 +168,9 @@ class uPlaylistNameHandler(Handler):
 
 class dPlaylistHandler(Handler):
     def push_changes(self):
-        playlist_data = self.mp_cur.execute("SELECT PlaylistName FROM Playlists WHERE IDPlaylist=?", (self.local_id,)).fetchone()
-        
-        if playlist_data is None:
-            raise LocalOutdated
+        self.api.delete_playlist(self.gmp_id)
 
-        gm_pid = self.gmp_id
-
-        self.api.delete_playlist(gm_pid)
-
-        return HandlerResult(action='delete', item_type='playlist', gm_id=gm_pid)    
+        return HandlerResult(action='delete', item_type='playlist', gm_id=self.gmp_id)    
 
 class changePlaylistHandler(Handler):
     def push_changes(self):
@@ -190,11 +183,13 @@ class changePlaylistHandler(Handler):
         #Get all the songs now in the playlist.
         song_rows = self.mp_cur.execute("SELECT IDSong FROM PlaylistSongs WHERE IDPlaylist=? ORDER BY SongOrder", (self.local_id,)).fetchall()
 
-
         #Build the new playlist.
         pl = []
         for r in song_rows:
-            pl.append(r[0])
+            #Would like to do this all in one query, but don't know how since there can be dupes.
+            r_id_row = self.id_cur.execute("SELECT gmId FROM GMSongIds WHERE localId = ?", (r['IDSong'],)).fetchone()
+            if r_id_row is not None:
+                pl.append({'id':r_id_row[0]}) #change_playlist takes a list of song dictionaries
 
         self.api.change_playlist(self.gmp_id, pl)
 
