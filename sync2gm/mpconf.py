@@ -35,14 +35,15 @@ HandlerResult = namedtuple('HandlerResult', ['action', 'item_type', 'gm_id'])
 #All handlers that create/delete remote items must return a HandlerResult.
 #This allows the service to keep track of local -> remote mappings.
 
-class Handler:
+class Handler(object):
     """A Handler can push out local changes to Google Music.
 
     A mediaplayer config defines one for each kind of local change (eg the addition of a song)."""
 
-    def __init__(self, local_id, api, mp_conn, gmid_conn, get_gm_id):
+    def __init__(self, local_id, api, mp_conn, gmid_conn, get_gm_id, logger):
         """Create an instance of a Handler. This is done by the service when a specific change is detected."""
  
+        self.log = logger
         self.local_id = local_id
         self.api = api
 
@@ -53,13 +54,20 @@ class Handler:
         self.id_cur = gmid_conn.cursor()
         self._get_gm_id = get_gm_id #a func that takes localid, item_type, cursor and returns the matching GM id, or raises UnmappedId
 
+
+    #The handler can use gms_id and/or gmp_id to get their remote id on the fly.
+
     @property
     def gms_id(self):
-        return self._get_gm_id(self.local_id, 'song', self.id_cur)
+        sid = self._get_gm_id(self.local_id, 'song', self.id_cur)
+        self.log.info("gms_id: %s", sid)
+        return sid 
 
     @property
     def gmp_id(self):
-        return self._get_gm_id(self.local_id, 'playlist', self.id_cur)
+        pid = self._get_gm_id(self.local_id, 'playlist', self.id_cur)
+        self.log.info("gmp_id: %s", pid)
+        return pid 
 
     def push_changes(self):
         """Send changes to Google Music. This is implemented in mediaplayer configurations.

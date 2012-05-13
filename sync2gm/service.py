@@ -259,10 +259,10 @@ class ChangePollThread(threading.Thread):
 
         # create console handler with a higher log level
         ch = logging.StreamHandler()
-        ch.setLevel(logging.WARNING)
+        ch.setLevel(logging.INFO) #want to make this WARNING later
 
         # create formatter and add it to the handlers
-        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        formatter = logging.Formatter('%(levelname)s: [%(asctime)s]  %(message)s')
         fh.setFormatter(formatter)
         ch.setFormatter(formatter)
 
@@ -330,8 +330,6 @@ class ChangePollThread(threading.Thread):
                with open(self._change_file) as f:
                    last_change_id = int(f.readline().strip())
                    
-            self.log.info("polling. last change: %s", last_change_id)
-
             #Buffer in changes to memory.
             #The limit is intended to limit risk of losing changes.
             max_changes = 10
@@ -358,12 +356,15 @@ class ChangePollThread(threading.Thread):
 
                     for change in changes:
                         c_id, c_type, local_id = change
-                        self.log.info("handling change id %s", c_id)
+                        self.log.info("==== handling change id %s", c_id)
                         
                         try:
                             #Create a Handler per the mp_conf specs, then use it to push our changes.
                             pair = self.action_pairs[c_type]
-                            handler = pair.handler(local_id, self.api, conn, self.make_gmid_conn(), self._get_gm_id) #TODO: is gmid_conn getting closed?
+                            self.log.info("handler name: %s", pair.handler.__name__)
+                            self.log.info("local id: %s", local_id)
+
+                            handler = pair.handler(local_id, self.api, conn, self.make_gmid_conn(), self._get_gm_id, self.log) #TODO: is gmid_conn getting closed?
                             res = handler.push_changes()
 
                             #When the handler created a remote object, update our local mappings.
@@ -382,6 +383,7 @@ class ChangePollThread(threading.Thread):
                         finally: #mark this change as handled, correctly or not
                             if not atomic_write(self._change_file, c_id):
                                 self.log.error("failed to write id %s to change file", c_id) 
+                                #TODO: getting an error here when the log file gets locked in Windows?
 
                             
 

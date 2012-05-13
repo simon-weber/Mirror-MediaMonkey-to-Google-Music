@@ -109,6 +109,7 @@ def get_path(local_id, cur):
 class cSongHandler(Handler):
     def push_changes(self):
         path = get_path(self.local_id, self.mp_cur)
+        self.log.info("song path: %s", path)
 
         new_ids = self.api.upload(path)
 
@@ -136,6 +137,7 @@ class uSongHandler(Handler):
             gm_song[gm_key] = data
 
         gm_song['id'] = self.gms_id
+        self.log.info("new metadata: %s", repr(gm_song))
 
         self.api.change_song_metadata(gm_song) #TODO should switch this to a safer method
     
@@ -153,6 +155,8 @@ class cPlaylistHandler(Handler):
         if playlist_data is None:
             raise LocalOutdated
 
+        self.log.info("new playlist: %s", playlist_data[0])
+
         new_gm_pid = self.api.create_playlist(playlist_data[0])
 
         return HandlerResult(action='create', item_type='playlist', gm_id=new_gm_pid)
@@ -163,6 +167,8 @@ class uPlaylistNameHandler(Handler):
 
         if playlist_data is None:
             raise LocalOutdated
+
+        self.log.info("updated playlist name: %s", playlist_data[0])
 
         self.api.change_playlist_name(self.gmp_id, playlist_data[0])
 
