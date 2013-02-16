@@ -1,6 +1,8 @@
 #sync2gm and mm2gm: sync MediaMonkey to Google Music
 
-As of June, I'm interning at Google. Due to their legal policies, I'm not allowed to contribute to the project. Sorry, everyone! 
+I haven't worked on this in a long time, but I'm thinking of reviving it in a simpler form. Instead of watching a database, I'd just watch a filesystem: watchdog makes this pretty simple. This would get you most of the way there if you keep an organized filesystem and write out tag changes.
+
+The old readme is below:
 
 - - -
 
